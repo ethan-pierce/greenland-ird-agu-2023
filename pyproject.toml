@@ -1,0 +1,25 @@
+[tool.poetry]
+name = "glacierbento"
+version = "0.1.0"
+description = ""
+authors = ["Ethan Pierce <ethan.pierce@colorado.edu>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = ">=3.10,<3.13"
+landlab = "^2.7.0"
+matplotlib = "^3.8.1"
+rioxarray = "^0.15.0"
+scipy = "^1.11.3"
+numpy = "^1.26.2"
+geopandas = "^0.14.1"
+shapely = "^2.0.2"
+jax = "^0.4.20"
+jaxlib = "^0.4.20"
+equinox = "^0.11.2"
+pytest = "^7.4.3"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
