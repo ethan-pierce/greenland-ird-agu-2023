@@ -62,13 +62,13 @@ def test_gradients():
     )
 
     assert_array_equal(
-        grid.calc_flux_div_at_node(link_array, boundary_values = 1),
+        grid.calc_flux_div_at_node(link_array, dirichlet_boundary = 1),
         [1, 1, 1, 1, 6, 1, 1, 1, 1]
     )
 
-    bvs = np.full(8, 1)
+    bvs = np.full(9, 1)
     assert_array_equal(
-        grid.calc_flux_div_at_node(link_array, boundary_values = bvs),
+        grid.calc_flux_div_at_node(link_array, dirichlet_boundary = bvs),
         [1, 1, 1, 1, 6, 1, 1, 1, 1]
     )
 

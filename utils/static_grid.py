@@ -30,6 +30,7 @@ class StaticGrid(eqx.Module):
     # Boundary conditions
     core_nodes: jax.Array = eqx.field(converter = jnp.asarray)
     boundary_nodes: jax.Array = eqx.field(converter = jnp.asarray)
+    status_at_node: jax.Array = eqx.field(converter = jnp.asarray)
 
     # Connectivity
     node_at_link_head: jax.Array = eqx.field(converter = jnp.asarray)
@@ -67,30 +68,10 @@ class StaticGrid(eqx.Module):
             self.length_of_link
         )
 
-    def calc_flux_div_at_node(self, array, boundary_values = None):
+    def calc_flux_div_at_node(self, array, dirichlet_boundary = 0.0):
         """At each node, calculate the divergence of an array of fluxes defined on links."""
-        net_fluxes = self.sum_at_nodes(array)
-        flux_div = jnp.divide(
-            net_fluxes[self.core_nodes], 
-            self.cell_area_at_node[self.core_nodes]
+        return jnp.where(
+            self.status_at_node == 0,
+            jnp.divide(self.sum_at_nodes(array), self.cell_area_at_node),
+            dirichlet_boundary
         )
-
-        out = jnp.zeros(self.number_of_nodes)
-        out = out.at[self.core_nodes].set(flux_div)
-
-        if boundary_values is None:
-            return out
-        else:
-            try:
-                out = out.at[self.boundary_nodes].set(boundary_values)
-            except:
-                try:
-                    out = out.at[self.boundary_nodes].set(
-                        jnp.full(len(self.boundary_nodes), boundary_values)
-                    )
-                except:
-                    raise ValueError(
-                        "Could not broadcast boundary_values to a vector of size ",
-                        len(self.boundary_nodes)
-                    )
-            return out

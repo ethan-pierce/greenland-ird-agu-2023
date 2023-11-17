@@ -1,38 +1,41 @@
 import pytest
 import numpy as np
 from numpy.testing import assert_array_equal
+import jax
 from landlab import RasterModelGrid
 from utils import StaticGrid, TVDAdvection
 
-def test_tvd_constructor():
+def test_tvd_algorithm():
     rmg = RasterModelGrid((3, 3))
     grid = StaticGrid.from_grid(rmg)
 
+    # Looks weird but necessary to test gradient ratio
     field = rmg.add_ones('field', at = 'node')
+    field[:5] = grid.node_x[:5] * 2
 
-    positive_velocity = rmg.add_ones('positive_velocity', at = 'link')
-    negative_velocity = rmg.add_ones('negative_velocity', at = 'link')
-    negative_velocity *= -1
+    velocity = rmg.add_ones('velocity', at = 'link')
+    velocity[5:7] *= -1
 
-    tvd_pos = TVDAdvection(grid, positive_velocity, field)
+    tvd = TVDAdvection(grid, velocity, field)
     assert_array_equal(
-        tvd_pos.upwind_links,
-        [-1, 0, -1, -1, -1, -1, 5, 2, 3, 4, -1, 10]
+        tvd.upwind_links,
+        [-1, 0, -1, -1, -1, 6, -1, 2, 3, 4, -1, 10]
     )
 
     assert_array_equal(
-        tvd_pos.gradient_ratio,
-        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
-    )
-
-    tvd_neg = TVDAdvection(grid, negative_velocity, field)
-    assert_array_equal(
-        tvd_neg.upwind_links,
-        [1, -1, 7, 8, 9, 6, -1, -1, -1, -1, 11, -1]
+        tvd.gradient_ratio,
+        [1, 1, 1, 1, 1, -0.5, 1, 0, 0, 1, 1, 1]
     )
 
     assert_array_equal(
-        tvd_neg.gradient_ratio,
-        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+        tvd.flux_limiter,
+        [1, 1, 1, 1, 1, 0, 1, 0, 0, 1, 1, 1]
     )
 
+    for i in range(10):
+        tvd = tvd.update(1.0)
+
+    assert_array_equal(
+        tvd.field,
+        [0, 2, 4, 0, 29526, 1, 1, 1, 1]
+    )
