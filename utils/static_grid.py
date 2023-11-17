@@ -16,6 +16,7 @@ class StaticGrid(eqx.Module):
     number_of_faces: int
     number_of_patches: int
     number_of_cells: int
+    spacing: tuple
 
     # Geometry
     node_x: jax.Array = eqx.field(converter = jnp.asarray)
