@@ -62,6 +62,12 @@ class StaticGrid(eqx.Module):
         """At each node, sum incoming and outgoing values of an array defined on links."""
         return jnp.sum(self.link_dirs_at_node * array[self.links_at_node], axis = 1)
     
+    def calc_slope_at_node(self, array):
+        """At each node, calculate the local slope of an array defined on nodes."""
+        return self.map_mean_of_links_to_node(
+            self.calc_grad_at_link(array)
+        )
+
     def calc_grad_at_link(self, array):
         """At each link, calculate the gradient of an array defined on nodes."""
         return jnp.divide(
