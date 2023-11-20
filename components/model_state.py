@@ -97,11 +97,13 @@ class ModelState(eqx.Module):
         self.overburden_pressure = (
             self.ice_density * self.gravity * self.ice_thickness
         )
+        self.effective_pressure = self.overburden_pressure - self.water_pressure
         self.sliding_velocity = self.grid.map_vectors_to_links(
             self.sliding_velocity_vector[0, :],
             self.sliding_velocity_vector[1, :]
         )
         self.shear_stress = self.calc_shear_stress()
+        print(self.shear_stress)
         
         self.data_vars = [i.name for i in dataclasses.fields(ModelState) if i.type == jax.Array]
         self.vars_at_node = [i for i in self.data_vars if len(getattr(self, i)) == self.grid.number_of_nodes]
@@ -131,16 +133,18 @@ class ModelState(eqx.Module):
         )
 
     def calc_shear_stress(self):
-        """Calculate shear stress at grid links (Zoet and Iverson, 2020)."""
-        velocity_magnitude = jnp.abs(self.sliding_velocity)
+        """Calculate shear stress at grid nodes (Zoet and Iverson, 2020)."""
+        velocity_magnitude = jnp.abs(
+            self.grid.map_mean_of_links_to_node(self.sliding_velocity)
+        )
         threshold_velocity = self.slip_law_coefficient * self.effective_pressure
         velocity_factor = jnp.float_power(
             velocity_magnitude / (velocity_magnitude + threshold_velocity),
             1 / self.slip_law_exponent
         )
-        
-        return (
-            self.effective_pressure
-            * jnp.tan(self.till_friction_angle)
-            * velocity_factor
+
+        return jnp.where(
+            self.ice_mask,
+            self.effective_pressure * jnp.tan(self.till_friction_angle) * velocity_factor,
+            0.0
         )
