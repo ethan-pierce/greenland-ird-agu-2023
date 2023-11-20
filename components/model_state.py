@@ -103,8 +103,15 @@ class ModelState(eqx.Module):
             self.sliding_velocity_vector[1, :]
         )
         self.shear_stress = self.calc_shear_stress()
-        print(self.shear_stress)
-        
+        self.frictional_heat_flux = jnp.abs(
+            self.grid.map_mean_of_links_to_node(self.sliding_velocity) * self.shear_stress
+        )
+        self.melt_rate = (
+            (self.geothermal_heat_flux + self.frictional_heat_flux)
+            / (self.ice_density * self.ice_latent_heat)
+        )
+
+
         self.data_vars = [i.name for i in dataclasses.fields(ModelState) if i.type == jax.Array]
         self.vars_at_node = [i for i in self.data_vars if len(getattr(self, i)) == self.grid.number_of_nodes]
         self.vars_at_link = [i for i in self.data_vars if len(getattr(self, i)) == self.grid.number_of_links]
