@@ -6,6 +6,7 @@ import jax.numpy as jnp
 import equinox as eqx
 import dataclasses
 
+from landlab import ModelGrid
 from utils import StaticGrid
 
 class ModelState(eqx.Module):
@@ -82,7 +83,38 @@ class ModelState(eqx.Module):
     min_ice_thickness: float = 0.1
 
     def __post_init__(self):
+        self.bedrock_elevation = self.surface_elevation - self.ice_thickness
+        self.node_is_terminus = jnp.where(
+            (self.grid.status_at_node != 0) & (self.bedrock_elevation < 0), 1, 0
+        )
+        self.ice_mask = jnp.where(self.ice_thickness > self.min_ice_thickness, 1, 0)
+        self.overburden_pressure = (
+            self.ice_density * self.gravity * self.ice_thickness
+        )
+        
         self.data_vars = [i.name for i in dataclasses.fields(ModelState) if i.type == jax.Array]
         self.vars_at_node = [i for i in self.data_vars if len(getattr(self, i)) == self.grid.number_of_nodes]
         self.vars_at_link = [i for i in self.data_vars if len(getattr(self, i)) == self.grid.number_of_links]
 
+    @classmethod
+    def from_grid(cls, grid):
+        """Instantiate the model state from an existing Landlab grid."""
+        for required in [
+            'ice_thickness', 
+            'surface_elevation', 
+            'sliding_velocity_vector', 
+            'geothermal_heat_flux', 
+            'water_pressure'
+        ]:
+            assert required in grid.at_node.keys()
+
+        static = StaticGrid.from_grid(grid)
+
+        return cls(
+            static,
+            grid.at_node['ice_thickness'],
+            grid.at_node['surface_elevation'],
+            grid.at_node['sliding_velocity_vector'],
+            grid.at_node['geothermal_heat_flux'],
+            grid.at_node['water_pressure']
+        )

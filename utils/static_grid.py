@@ -24,6 +24,7 @@ class StaticGrid(eqx.Module):
     x_of_corner: jax.Array = eqx.field(converter = jnp.asarray)
     y_of_corner: jax.Array = eqx.field(converter = jnp.asarray)
     length_of_link: jax.Array = eqx.field(converter = jnp.asarray)
+    angle_of_link: jax.Array = eqx.field(converter = jnp.asarray)
     length_of_face: jax.Array = eqx.field(converter = jnp.asarray)
     area_of_patch: jax.Array = eqx.field(converter = jnp.asarray)
     cell_area_at_node: jax.Array = eqx.field(converter = jnp.asarray)
@@ -58,10 +59,21 @@ class StaticGrid(eqx.Module):
         """Map an array of values from nodes to links."""
         return 0.5 * (array[self.node_at_link_head] + array[self.node_at_link_tail])
 
+    def map_vectors_to_links(self, x_component, y_component):
+        """Map magnitude and sign of vectors with components (xcomp, ycomp) onto grid links."""
+        ux_at_link = self.map_mean_of_link_nodes_to_link(x_component)
+        uy_at_link = self.map_mean_of_link_nodes_to_link(y_component)
+
+        magnitude = jnp.sqrt(ux_at_link**2 + uy_at_link**2)
+        vector_angle = jnp.arctan2(uy_at_link, ux_at_link)
+        mapped_angle = vector_angle - self.angle_of_link
+
+        return magnitude * jnp.cos(mapped_angle)
+
     def sum_at_nodes(self, array):
         """At each node, sum incoming and outgoing values of an array defined on links."""
         return jnp.sum(self.link_dirs_at_node * array[self.links_at_node], axis = 1)
-    
+
     def calc_slope_at_node(self, array):
         """At each node, calculate the local slope of an array defined on nodes."""
         return self.map_mean_of_links_to_node(

@@ -3,8 +3,10 @@
 import numpy as np
 import jax
 import jax.numpy as jnp
+import equinox as eqx
 
-from utils import StaticGrid, ModelState
+from utils import StaticGrid
+from components import ModelState
 
 class GlacialEroder(eqx.Module):
     """Erode bedrock beneath an ice mass by abrasion and quarrying."""

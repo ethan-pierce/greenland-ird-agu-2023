@@ -1,6 +1,6 @@
 import pytest
 import numpy as np
-from numpy.testing import assert_array_equal
+from numpy.testing import assert_array_equal, assert_array_almost_equal
 import dataclasses
 import jax
 from landlab import RasterModelGrid
@@ -33,6 +33,15 @@ def test_mapping_between_elements():
     assert_array_equal(
         grid.map_mean_of_links_to_node(link_array),
         [1, 1, 1, 1.5, 2, 1.5, 1, 1, 1]
+    )
+
+    ux = np.full(grid.number_of_links, 1.0)
+    uy = np.full(grid.number_of_links, 0.0)
+    vec = grid.map_vectors_to_links(ux, uy)
+
+    assert_array_almost_equal(
+        vec,
+        [1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1]
     )
 
 def test_gradients():
