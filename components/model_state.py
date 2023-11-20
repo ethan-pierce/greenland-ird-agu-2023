@@ -72,7 +72,7 @@ class ModelState(eqx.Module):
     vars_at_node: list = eqx.field(init = False)
     vars_at_link: list = eqx.field(init = False)
 
-    # Constant parameters
+    # Physical parameters
     time_elapsed: float = 0.0
     sec_per_a: int = 31556926
     gravity: float = 9.81
@@ -80,6 +80,12 @@ class ModelState(eqx.Module):
     water_viscosity: float = 1.8e-3
     ice_density: float = 917
     ice_latent_heat: float = 3.34e5
+
+    slip_law_coefficient: float = 3.4e-4
+    slip_law_exponent: int = 5
+    till_friction_angle: float = jnp.deg2rad(30)
+
+    # Numerical parameters
     min_ice_thickness: float = 0.1
 
     def __post_init__(self):
@@ -91,6 +97,11 @@ class ModelState(eqx.Module):
         self.overburden_pressure = (
             self.ice_density * self.gravity * self.ice_thickness
         )
+        self.sliding_velocity = self.grid.map_vectors_to_links(
+            self.sliding_velocity_vector[0, :],
+            self.sliding_velocity_vector[1, :]
+        )
+        self.shear_stress = self.calc_shear_stress()
         
         self.data_vars = [i.name for i in dataclasses.fields(ModelState) if i.type == jax.Array]
         self.vars_at_node = [i for i in self.data_vars if len(getattr(self, i)) == self.grid.number_of_nodes]
@@ -117,4 +128,19 @@ class ModelState(eqx.Module):
             grid.at_node['sliding_velocity_vector'],
             grid.at_node['geothermal_heat_flux'],
             grid.at_node['water_pressure']
+        )
+
+    def calc_shear_stress(self):
+        """Calculate shear stress at grid links (Zoet and Iverson, 2020)."""
+        velocity_magnitude = jnp.abs(self.sliding_velocity)
+        threshold_velocity = self.slip_law_coefficient * self.effective_pressure
+        velocity_factor = jnp.float_power(
+            velocity_magnitude / (velocity_magnitude + threshold_velocity),
+            1 / self.slip_law_exponent
+        )
+        
+        return (
+            self.effective_pressure
+            * jnp.tan(self.till_friction_angle)
+            * velocity_factor
         )
