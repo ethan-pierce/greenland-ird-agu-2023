@@ -37,7 +37,7 @@ class GlacialEroder(eqx.Module):
         )
 
     def update(self, dt: float):
-        """Update the model state to reflect erosion over one time step of size dt."""
+        """Update the model state to reflect erosion over one time step of dt years."""
         abrasion = self.calc_abrasion_rate()
         quarrying = self.calc_quarrying_rate()
 
