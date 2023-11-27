@@ -43,7 +43,9 @@ class ModelState(eqx.Module):
     # Glacier geometry
     ice_thickness: jax.Array = eqx.field(converter = jnp.asarray)
     surface_elevation: jax.Array = eqx.field(converter = jnp.asarray)
+    surface_slope: jax.Array = eqx.field(converter = jnp.asarray, init = False)
     bedrock_elevation: jax.Array = eqx.field(converter = jnp.asarray, init = False)
+    bedrock_slope: jax.Array = eqx.field(converter = jnp.asarray, init = False)
     node_is_terminus: jax.Array = eqx.field(converter = jnp.asarray, init = False)
     ice_mask: jax.Array = eqx.field(converter = jnp.asarray, init = False)
 
@@ -87,9 +89,12 @@ class ModelState(eqx.Module):
 
     # Numerical parameters
     min_ice_thickness: float = 0.1
+    min_fringe_thickness: float = 1e-3
 
     def __post_init__(self):
+        self.surface_slope = self.grid.calc_slope_at_node(self.surface_elevation)
         self.bedrock_elevation = self.surface_elevation - self.ice_thickness
+        self.bedrock_slope = self.grid.calc_slope_at_node(self.bedrock_elevation)
         self.node_is_terminus = jnp.where(
             (self.grid.status_at_node != 0) & (self.bedrock_elevation < 0), 1, 0
         )
@@ -111,6 +116,9 @@ class ModelState(eqx.Module):
             / (self.ice_density * self.ice_latent_heat)
         )
 
+        self.till_thickness = jnp.full(self.grid.number_of_nodes, 0.0)
+        self.fringe_thickness = jnp.full(self.grid.number_of_nodes, self.min_fringe_thickness)
+        self.dispersed_thickness = jnp.full(self.grid.number_of_nodes, 0.0)
 
         self.data_vars = [i.name for i in dataclasses.fields(ModelState) if i.type == jax.Array]
         self.vars_at_node = [i for i in self.data_vars if len(getattr(self, i)) == self.grid.number_of_nodes]

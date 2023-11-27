@@ -28,3 +28,4 @@ def grid():
 @pytest.fixture
 def state(grid):
     state = ModelState.from_grid(grid)
+    return state
