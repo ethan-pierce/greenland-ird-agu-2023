@@ -43,8 +43,10 @@ class GlacialEroder(eqx.Module):
 
         total_erosion = (abrasion + quarrying) * dt
 
-        return eqx.tree_at(
+        updated_state = eqx.tree_at(
             lambda tree: tree.till_thickness, 
             self.state,
             self.state.till_thickness + total_erosion
         )
+
+        return GlacialEroder(self.grid, updated_state)
