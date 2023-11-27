@@ -22,6 +22,8 @@ class ModelState(eqx.Module):
 
     Derived variables:
         bedrock_elevation: Difference between surface elevation and ice thickness.
+        surface_slope: Slope of the ice surface.
+        bedrock_slope: Slope of the bedrock beneath the glacier.
         node_is_terminus: Boolean array indicating terminus nodes.
         ice_mask: Boolean array where ice thickness > a threshold value.
         overburden_pressure: Hydrostatic pressure at the base of the ice mass.
