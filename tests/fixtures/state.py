@@ -20,7 +20,7 @@ def grid():
         (rmg.node_x * 10, np.ones(rmg.number_of_nodes)),
         at = 'node'
     )
-    rmg.add_field('geothermal_heat_flux', np.full(rmg.number_of_nodes, 0.05), at = 'node')
+    rmg.add_field('geothermal_heat_flux', np.full(rmg.number_of_nodes, 0.05 * 31556926), at = 'node')
     rmg.add_field('water_pressure', rmg.at_node['ice_thickness'][:] * 917 * 9.81 * 0.8, at = 'node')
 
     return rmg

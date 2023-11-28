@@ -36,3 +36,42 @@ def test_frozen_fringe(grid, state):
         1.0007,
         4
     )
+
+    assert_almost_equal(
+        np.mean(model.saturation),
+        0.00095,
+        5
+    )
+    
+    assert_almost_equal(
+        np.mean(model.nominal_heave_rate),
+        1.35e-9,
+        11
+    )
+
+    assert_almost_equal(
+        np.mean(model.flow_resistivity),
+        0.0573,
+        4
+    )
+
+    assert_almost_equal(
+        np.mean(model.heave_rate),
+        -2.573e-7,
+        10
+    )
+
+    assert_almost_equal(
+        np.mean(model.fringe_growth_rate),
+        6.83e-4,
+        6
+    )
+
+    for i in range(10):
+        model = model.update(100.0)
+
+    assert_almost_equal(
+        np.mean(model.state.fringe_thickness),
+        0.074,
+        4
+    )

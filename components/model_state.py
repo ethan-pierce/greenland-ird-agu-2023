@@ -64,8 +64,6 @@ class ModelState(eqx.Module):
     effective_pressure: jax.Array = eqx.field(converter = jnp.asarray, init = False)
     melt_rate: jax.Array = eqx.field(converter = jnp.asarray, init = False)
 
-    # Thermodynamics
-
     # Sediment transport
     till_thickness: jax.Array = eqx.field(converter = jnp.asarray, init = False)
     fringe_thickness: jax.Array = eqx.field(converter = jnp.asarray, init = False)
