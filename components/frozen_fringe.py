@@ -115,7 +115,12 @@ class FrozenFringe(eqx.Module):
 
     def update(self, dt: float):
         """Advance the model by one step of dt years."""
-        fringe_thickness = self.state.fringe_thickness + self.fringe_growth_rate * dt
+        real_growth_rate = jnp.minimum(
+            self.fringe_growth_rate,
+            self.state.till_thickness
+        )
+
+        fringe_thickness = self.state.fringe_thickness + real_growth_rate * dt
         fringe_thickness = jnp.where(
             fringe_thickness < self.state.min_fringe_thickness,
             self.state.min_fringe_thickness,
@@ -126,6 +131,19 @@ class FrozenFringe(eqx.Module):
             lambda tree: tree.fringe_thickness, 
             self.state,
             fringe_thickness
+        )
+
+        till_thickness = self.state.till_thickness - real_growth_rate * dt
+        till_thickness = jnp.where(
+            till_thickness < 0,
+            0,
+            till_thickness
+        )
+
+        updated_state = eqx.tree_at(
+            lambda tree: tree.till_thickness,
+            updated_state,
+            till_thickness
         )
 
         return FrozenFringe(self.grid, updated_state)

@@ -1,11 +1,18 @@
 import pytest
 import numpy as np
 from numpy.testing import assert_almost_equal
+import jax.numpy as jnp
+import equinox as eqx
 
 from .fixtures import grid, state
 from components import FrozenFringe
 
 def test_frozen_fringe(grid, state):
+    state = eqx.tree_at(
+        lambda tree: tree.till_thickness,
+        state,
+        jnp.full(grid.number_of_nodes, 10.)
+    )
     model = FrozenFringe(grid, state)
 
     assert_almost_equal(
@@ -74,4 +81,10 @@ def test_frozen_fringe(grid, state):
         np.mean(model.state.fringe_thickness),
         0.074,
         4
+    )
+
+    assert_almost_equal(
+        np.mean(model.state.till_thickness),
+        10 - 0.074,
+        3
     )
