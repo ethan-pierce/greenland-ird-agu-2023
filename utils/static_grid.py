@@ -37,7 +37,7 @@ class StaticGrid(eqx.Module):
     node_at_link_tail: jax.Array = eqx.field(converter = jnp.asarray)
     links_at_node: jax.Array = eqx.field(converter = jnp.asarray)
     link_dirs_at_node: jax.Array = eqx.field(converter = jnp.asarray)
-    parallel_links_at_link: jax.Array = eqx.field(converter = jnp.asarray)
+    # parallel_links_at_link: jax.Array = eqx.field(converter = jnp.asarray)
     face_at_link: jax.Array = eqx.field(converter = jnp.asarray)
     cell_at_node: jax.Array = eqx.field(converter = jnp.asarray)
 
