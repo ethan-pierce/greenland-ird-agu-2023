@@ -58,7 +58,7 @@ class GridLoader:
             )
 
         boundary = self._smooth_boundary(self.geoseries.geometry, buffer = buffer)[0]
-        self.polygon = shapely.simplify(boundary, tolerance)
+        self.polygon = shapely.simplify(boundary, tolerance).buffer(0)
 
         nodes_y = np.array(self.polygon.exterior.xy[1])
         nodes_x = np.array(self.polygon.exterior.xy[0])
@@ -297,27 +297,38 @@ def main():
     for i in os.listdir('/home/egp/repos/greenland-ird/data/basin-outlines/SW/'):
         paths.append('SW/' + i)
 
+    paths = ['CE/daugaard-jensen-gletsjer.geojson']
+
     for path in paths:
         glacier = path.split('/')[-1].replace('.geojson', '')
         print('Constructing mesh for ', glacier)
 
-        if glacier in ['sydbrae', 'charcot-gletscher', 'graah-gletscher', 'dode-brae']:
-            max_area = 1e5
-        elif glacier == 'bredegletsjer':
-            print('Testing bredegletsjer')
-            max_area = 1e4
-        else:
-            max_area = 1e6
+        area = gpd.read_file(shapefiles + path).geometry.area
+        tol = np.round(float(area) * 2e-8, 2)
+        buffer = 250
+
+        if glacier in ['kista-dan-gletsjer', 'magga-dan-gletsjer']:
+            buffer = tol
+        if glacier in ['sermeq-kullajeq']:
+            buffer = 0.5 * tol
+
+        if glacier in ['daugaard-jensen-gletsjer']:
+            tol *= 0.5
 
         loader = GridLoader(
             shapefiles + path, 
             centered = False, 
             generate_grid = True, 
-            max_area = max_area, 
-            quality = 30,
-            buffer = 250.0,
-            tolerance = 10.0
+            max_area = int(area / 10000), 
+            quality = 20,
+            buffer = buffer,
+            tolerance = tol
         )
+
+        print('Mesh nodes: ', loader.grid.number_of_nodes)
+        print('Mesh links: ', loader.grid.number_of_links)
+
+        plot_triangle_mesh(loader.grid, loader.grid.node_x, subplots_args = {'figsize': (18, 6)})
 
         if glacier in ['eielson-gletsjer', 'sermeq-avannarleq', 'sermeq-kullajeq']:
             resolution = calc_resolution(loader.polygon, n_cells = 30000)
@@ -392,8 +403,6 @@ def main():
         )
         print("Added surface velocity to grid nodes.")
 
-        print('Mesh nodes: ', loader.grid.number_of_nodes)
-        print('Mesh links: ', loader.grid.number_of_links)
         loader.grid.save('/home/egp/repos/glacierbento/examples/ird/meshes/' + glacier + '.grid', clobber = True)
 
         # QC
