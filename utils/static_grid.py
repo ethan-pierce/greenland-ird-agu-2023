@@ -9,14 +9,12 @@ class StaticGrid(eqx.Module):
     """Handles grid elements, connectivity, and computes gradients."""
 
     # Basic information
-    shape: tuple
     number_of_nodes: int
     number_of_corners: int
     number_of_links: int
     number_of_faces: int
     number_of_patches: int
     number_of_cells: int
-    spacing: tuple
 
     # Geometry
     node_x: jax.Array = eqx.field(converter = jnp.asarray)
