@@ -380,8 +380,6 @@ def main():
             sigma = 5
         )
 
-        plot_triangle_mesh(loader.grid, loader.grid.at_node['smoothed_surface'][:])
-
         loader.grid.add_field(
             'surface_elevation', 
             loader.grid.at_node['ice_thickness'][:] + loader.grid.at_node['bedrock_elevation'][:],
