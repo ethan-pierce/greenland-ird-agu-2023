@@ -108,9 +108,11 @@ with open('./examples/ird/landlab_grids.pickle', 'rb') as g:
 glacier = 'rolige-brae'
 state = models[glacier]
 
-fringe = FrozenFringe(state)
+for i in range(10):
+    fringe = FrozenFringe(state)
+    state = fringe.update(dt = 0.1).state
 
-plot_triangle_mesh(grids[glacier], fringe.calc_heave_rate(), subplots_args = {'figsize': (18, 6)})
+plot_triangle_mesh(grids[glacier], fringe.calc_fringe_growth_rate() * 0.1 * state.sec_per_a, subplots_args = {'figsize': (18, 6)})
 
 ########################
 # Step 4: Save results #
