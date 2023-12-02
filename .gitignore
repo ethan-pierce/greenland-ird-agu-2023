@@ -1,2 +1,2 @@
-examples/ird/starting_point.pickle
+examples/ird/*.pickle
 examples/ird/meshes

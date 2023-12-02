@@ -41,14 +41,6 @@ class StaticGrid(eqx.Module):
     face_at_link: jax.Array = eqx.field(converter = jnp.asarray)
     cell_at_node: jax.Array = eqx.field(converter = jnp.asarray)
 
-    @classmethod
-    def from_grid(cls, grid):
-        """Instantiate a StaticGrid from an existing Landlab grid."""
-        fields = {
-            field.name: getattr(grid, field.name) for field in dataclasses.fields(StaticGrid)
-        }
-        return cls(**fields)
-
     def map_mean_of_links_to_node(self, array):
         """Map an array of values from links to nodes."""
         return jnp.mean(array[self.links_at_node], axis = 1)
@@ -92,3 +84,10 @@ class StaticGrid(eqx.Module):
             jnp.divide(self.sum_at_nodes(array), self.cell_area_at_node),
             dirichlet_boundary
         )
+
+def freeze_grid(grid) -> StaticGrid:
+    """Convert an existing Landlab grid to a new StaticGrid"""
+    fields = {
+        field.name: getattr(grid, field.name) for field in dataclasses.fields(StaticGrid)
+    }
+    return StaticGrid(**fields)

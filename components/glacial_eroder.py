@@ -11,8 +11,8 @@ from components import ModelState
 class GlacialEroder(eqx.Module):
     """Erode bedrock beneath an ice mass by abrasion and quarrying."""
 
-    grid: StaticGrid
     state: ModelState
+    grid: StaticGrid = eqx.field(init = False)
 
     sliding_velocity: jax.Array = eqx.field(converter = jnp.asarray, init = False)
     bedrock_slope: jax.Array = eqx.field(converter = jnp.asarray, init = False)
@@ -20,6 +20,7 @@ class GlacialEroder(eqx.Module):
     quarrying_coefficient: float = 2e-6 # m / a
 
     def __post_init__(self):
+        self.grid = self.state.grid
         self.sliding_velocity = self.grid.map_mean_of_links_to_node(self.state.sliding_velocity)
         self.bedrock_slope = self.grid.calc_slope_at_node(self.state.bedrock_elevation)
 
@@ -31,9 +32,8 @@ class GlacialEroder(eqx.Module):
         """Calculate the rate of erosion from quarrying."""
         return (
             self.quarrying_coefficient 
-            * self.state.effective_pressure**3
-            * self.sliding_velocity
-            * self.bedrock_slope**2
+            * (self.state.effective_pressure * 1e-6)**3
+            * jnp.abs(self.sliding_velocity)
         )
 
     def update(self, dt: float):
@@ -49,4 +49,4 @@ class GlacialEroder(eqx.Module):
             self.state.till_thickness + total_erosion
         )
 
-        return GlacialEroder(self.grid, updated_state)
+        return GlacialEroder(updated_state)

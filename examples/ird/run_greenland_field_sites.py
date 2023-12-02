@@ -20,57 +20,95 @@ import matplotlib.pyplot as plt
 
 from landlab import RasterModelGrid
 from components import ModelState, GlacialEroder, FrozenFringe
+from components.model_state import initialize_state_from_grid
 from utils import StaticGrid, TVDAdvection
+from utils.static_grid import freeze_grid
 from utils.plotting import plot_links, plot_triangle_mesh
+
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument('--gen_mesh', default = False, action = 'store_true')
+args = parser.parse_args()
 
 #####################
 # Step 1: Load data #
 #####################
 
-input_dir = './examples/ird/meshes/'
-models = {}
+if args.gen_mesh:
 
-for f in os.listdir(input_dir):
-    glacier = f.split('/')[-1].replace('.grid', '')
+    input_dir = './examples/ird/meshes/'
+    models = {}
+    grids = {}
 
-    with open(input_dir + f, 'rb') as g:
-        tmg = pickle.load(g)
+    for f in os.listdir(input_dir):
+        glacier = f.split('/')[-1].replace('.grid', '')
+
+        with open(input_dir + f, 'rb') as g:
+            tmg = pickle.load(g)
+            
+            from landlab.graph.sort.sort import reorient_link_dirs
+            reorient_link_dirs(tmg)
+
+        grid = freeze_grid(tmg)
+
+        H = tmg.at_node['ice_thickness'][:]
+        S = tmg.at_node['smoothed_surface'][:]
         
-        from landlab.graph.sort.sort import reorient_link_dirs
-        reorient_link_dirs(tmg)
+        gradS = grid.calc_grad_at_link(S)
+        A = 1.2e-24
+        gamma = (2/5) * A * (917 * 9.81)**3
+        secpera = 31556926
+        Ud = gamma * grid.map_mean_of_link_nodes_to_link(H)**4 * gradS**3 * secpera
+        Us = grid.map_vectors_to_links(tmg.at_node['surface_velocity_x'][:], tmg.at_node['surface_velocity_y'][:])
+        Ub = np.where(
+            np.abs(Ud) > np.abs(Us),
+            0.0,
+            np.sign(Us) * (np.abs(Us) - np.abs(Ud))
+        )
 
-    grid = StaticGrid.from_grid(tmg)
+        tmg.add_field('sliding_velocity', Ub, at = 'link')
+        tmg.add_field('water_pressure', H * 917 * 9.81 * 0.8, at = 'node')
 
-    H = tmg.at_node['ice_thickness'][:]
-    S = tmg.at_node['smoothed_surface'][:]
-    
-    gradS = grid.calc_grad_at_link(S)
-    A = 1.2e-24
-    gamma = (2/5) * A * (917 * 9.81)**3
-    secpera = 31556926
-    Ud = gamma * grid.map_mean_of_link_nodes_to_link(H)**4 * gradS**3 * secpera
-    Us = grid.map_vectors_to_links(tmg.at_node['surface_velocity_x'][:], tmg.at_node['surface_velocity_y'][:])
-    Ub = np.where(
-        np.abs(Ud) > np.abs(Us),
-        0.0,
-        np.sign(Us) * (np.abs(Us) - np.abs(Ud))
-    )
+        state = initialize_state_from_grid(tmg)
+        models[glacier] = state
+        grids[glacier] = tmg
 
-    tmg.add_field('sliding_velocity', Ub, at = 'link')
-    tmg.add_field('water_pressure', H * 917 * 9.81 * 0.8, at = 'node')
+        print('Loaded data for ' + glacier.replace('-', ' ').title())
 
-    state = ModelState.from_grid(tmg)
-    models[glacier] = state
+    with open('./examples/ird/initial_conditions.pickle', 'wb') as f:
+        pickle.dump(models, f)
 
-    print('Loaded data for ' + glacier.replace('-', ' ').title())
+    with open('./examples/ird/landlab_grids.pickle', 'wb') as g:
+        pickle.dump(grids, g)
 
 #################################
 # Step 2: Define update routine #
 #################################
 
+@jax.jit
+def update(state, dt: float):
+    eroder = GlacialEroder(state)
+    state = eroder.update(dt).state
+
+    return state
+
 ######################
 # Step 3: Run models #
 ######################
+
+with open('./examples/ird/initial_conditions.pickle', 'rb') as f:
+    models = pickle.load(f)
+
+with open('./examples/ird/landlab_grids.pickle', 'rb') as g:
+    grids = pickle.load(g)
+
+glacier = 'rolige-brae'
+state = models[glacier]
+
+for i in range(100):
+    state = update(state, dt = 1.0)
+
+plot_triangle_mesh(grids[glacier], state.till_thickness, subplots_args = {'figsize': (18, 6)})
 
 ########################
 # Step 4: Save results #

@@ -8,6 +8,7 @@ import dataclasses
 
 from landlab import ModelGrid
 from utils import StaticGrid
+from utils.static_grid import freeze_grid
 
 class ModelState(eqx.Module):
     """Store variable fields, shared parameters, and elapsed time.
@@ -67,11 +68,6 @@ class ModelState(eqx.Module):
     fringe_thickness: jax.Array = eqx.field(converter = jnp.asarray, init = False)
     dispersed_thickness: jax.Array = eqx.field(converter = jnp.asarray, init = False)
 
-    # Lists of variables and locations
-    data_vars: list = eqx.field(init = False)
-    vars_at_node: list = eqx.field(init = False)
-    vars_at_link: list = eqx.field(init = False)
-
     # Physical parameters
     time_elapsed: float = 0.0
     sec_per_a: int = 31556926
@@ -114,37 +110,6 @@ class ModelState(eqx.Module):
         self.fringe_thickness = jnp.full(self.grid.number_of_nodes, self.min_fringe_thickness)
         self.dispersed_thickness = jnp.full(self.grid.number_of_nodes, 0.0)
 
-        self.data_vars = [i.name for i in dataclasses.fields(ModelState) if i.type == jax.Array]
-        self.vars_at_node = [i for i in self.data_vars if len(getattr(self, i)) == self.grid.number_of_nodes]
-        self.vars_at_link = [i for i in self.data_vars if len(getattr(self, i)) == self.grid.number_of_links]
-
-    @classmethod
-    def from_grid(cls, grid):
-        """Instantiate the model state from an existing Landlab grid."""
-        for required in [
-            'ice_thickness', 
-            'surface_elevation', 
-            'geothermal_heat_flux', 
-            'water_pressure'
-        ]:
-            if required not in grid.at_node.keys():
-                raise AttributeError("Missing " + required + " at grid nodes.")
-        
-        for required in ['sliding_velocity']:
-            if required not in grid.at_link.keys():
-                raise AttributeError("Missing " + required + " at grid links.")
-
-        static = StaticGrid.from_grid(grid)
-
-        return cls(
-            static,
-            grid.at_node['ice_thickness'],
-            grid.at_node['surface_elevation'],
-            grid.at_link['sliding_velocity'],
-            grid.at_node['geothermal_heat_flux'],
-            grid.at_node['water_pressure']
-        )
-
     def calc_shear_stress(self):
         """Calculate shear stress at grid nodes (Zoet and Iverson, 2020)."""
         velocity_magnitude = jnp.abs(
@@ -161,3 +126,38 @@ class ModelState(eqx.Module):
             self.effective_pressure * jnp.tan(self.till_friction_angle) * velocity_factor,
             0.0
         )
+
+
+# IMPORTANT: this needs to stay as a top-level function, not a class function.
+# (Because jax.jit will not accept strings as valid JAX types.)
+
+def initialize_state_from_grid(grid: ModelGrid) -> ModelState:
+    """Instantiate a model state from an existing Landlab grid."""
+    for required in [
+        'ice_thickness', 
+        'surface_elevation', 
+        'geothermal_heat_flux', 
+        'water_pressure'
+    ]:
+        if required not in grid.at_node.keys():
+            raise AttributeError("Missing " + required + " at grid nodes.")
+    
+    for required in ['sliding_velocity']:
+        if required not in grid.at_link.keys():
+            raise AttributeError("Missing " + required + " at grid links.")
+
+    static = freeze_grid(grid)
+
+    return ModelState(
+        static,
+        grid.at_node['ice_thickness'],
+        grid.at_node['surface_elevation'],
+        grid.at_link['sliding_velocity'],
+        grid.at_node['geothermal_heat_flux'],
+        grid.at_node['water_pressure']
+    )
+
+# More utility one-liners for inspecting state
+# self.data_vars = [i.name for i in dataclasses.fields(ModelState) if i.type == jax.Array]
+# self.vars_at_node = [i for i in self.data_vars if len(getattr(self, i)) == self.grid.number_of_nodes]
+# self.vars_at_link = [i for i in self.data_vars if len(getattr(self, i)) == self.grid.number_of_links]
