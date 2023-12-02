@@ -90,6 +90,8 @@ def update(state, dt: float):
     eroder = GlacialEroder(state)
     state = eroder.update(dt).state
 
+    fringe = FrozenFringe(state)
+
     return state
 
 ######################

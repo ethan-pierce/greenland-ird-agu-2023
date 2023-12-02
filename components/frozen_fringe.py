@@ -11,8 +11,8 @@ from components import ModelState
 class FrozenFringe(eqx.Module):
     """Entrain sediment in frozen fringe and dispersed basal ice layers."""
 
-    grid: StaticGrid
     state: ModelState
+    grid: StaticGrid = eqx.field(init = False)
 
     # Physical constants
     surface_energy: float = 0.034
@@ -40,6 +40,7 @@ class FrozenFringe(eqx.Module):
     fringe_growth_rate: jnp.array = eqx.field(converter = jnp.asarray, init = False)
 
     def __post_init__(self):
+        self.grid = self.state.grid
         self.entry_pressure = 2 * self.surface_energy / self.pore_throat_radius
         self.base_temperature = (
             self.melt_temperature
@@ -146,4 +147,4 @@ class FrozenFringe(eqx.Module):
             till_thickness
         )
 
-        return FrozenFringe(self.grid, updated_state)
+        return FrozenFringe(updated_state)
