@@ -11,6 +11,7 @@ import geopandas as gpd
 import shapely
 import itertools
 from scipy.interpolate import RBFInterpolator
+from scipy.ndimage import gaussian_filter
 from rasterio.enums import Resampling
 from landlab import TriangleMeshGrid
 
@@ -138,6 +139,11 @@ class GridLoader:
         """Multiply a dataarray by a scalar."""
         return source * scalar
 
+    def _smooth(self, source: xr.DataArray, sigma: float) -> xr.DataArray:
+        """Smooth an input dataarray."""
+        source.values = gaussian_filter(source.values, sigma = sigma)
+        return source
+
     def _interpolate_to_mesh(
         self, source: xr.DataArray, neighbors: int = 9, smoothing: float = 0.0
     ) -> np.ndarray:
@@ -174,7 +180,8 @@ class GridLoader:
         no_data=None,
         neighbors=9,
         smoothing=0.0,
-        scalar=1.0
+        scalar=1.0,
+        sigma=0
     ):
         """Read a field from a netCDF file and add it to the grid."""
         if len(ll_name) == 0:
@@ -191,7 +198,13 @@ class GridLoader:
         projected = self._reproject(translated, resolution)
         filled = self._interpolate_na(projected)
         rescaled = self._rescale(filled, scalar)
-        gridded = self._interpolate_to_mesh(rescaled, neighbors=neighbors, smoothing=smoothing)
+
+        if sigma > 0:
+            smoothed = self._smooth(rescaled, sigma)
+        else:
+            smoothed = rescaled
+
+        gridded = self._interpolate_to_mesh(smoothed, neighbors=neighbors, smoothing=smoothing)
 
         self.grid.add_field(ll_name, gridded, at="node")
 
@@ -297,8 +310,6 @@ def main():
     for i in os.listdir('/home/egp/repos/greenland-ird/data/basin-outlines/SW/'):
         paths.append('SW/' + i)
 
-    paths = ['CE/daugaard-jensen-gletsjer.geojson']
-
     for path in paths:
         glacier = path.split('/')[-1].replace('.geojson', '')
         print('Constructing mesh for ', glacier)
@@ -327,8 +338,6 @@ def main():
 
         print('Mesh nodes: ', loader.grid.number_of_nodes)
         print('Mesh links: ', loader.grid.number_of_links)
-
-        plot_triangle_mesh(loader.grid, loader.grid.node_x, subplots_args = {'figsize': (18, 6)})
 
         if glacier in ['eielson-gletsjer', 'sermeq-avannarleq', 'sermeq-kullajeq']:
             resolution = calc_resolution(loader.polygon, n_cells = 30000)
@@ -359,6 +368,19 @@ def main():
             no_data = -9999.0,
         )
         print("Added bedrock elevation to grid nodes.")
+
+        loader.add_field(
+            bedmachine,
+            "surface",
+            "smoothed_surface",
+            resolution,
+            crs = "epsg:3413",
+            neighbors = 9,
+            no_data = -9999.0,
+            sigma = 5
+        )
+
+        plot_triangle_mesh(loader.grid, loader.grid.at_node['smoothed_surface'][:])
 
         loader.grid.add_field(
             'surface_elevation', 
@@ -406,7 +428,7 @@ def main():
         loader.grid.save('/home/egp/repos/glacierbento/examples/ird/meshes/' + glacier + '.grid', clobber = True)
 
         # QC
-        # plot_triangle_mesh(loader.grid, loader.grid.at_node['ice_thickness'][:], subplots_args = {'figsize': (18, 6)})
+        plot_triangle_mesh(loader.grid, loader.grid.at_node['smoothed_surface'][:], subplots_args = {'figsize': (18, 6)})
         # plot_triangle_mesh(loader.grid, loader.grid.at_node['surface_velocity_x'][:], subplots_args = {'figsize': (18, 6)})
 
         print('Finished loading data for ' + glacier.replace('-', ' ').capitalize())

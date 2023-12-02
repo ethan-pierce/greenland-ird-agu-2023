@@ -12,7 +12,7 @@ import numpy as np
 import xarray as xr
 import rioxarray as rxr
 import geopandas as gpd
-from scipy.ndimage import gaussian_filter
+from scipy.interpolate import bisplrep, bisplev
 
 import jax
 import jax.numpy as jnp
@@ -41,6 +41,22 @@ for f in os.listdir(input_dir):
 
     tmg.add_field('water_pressure', H * 917 * 9.81 * 0.8, at = 'node')
     
+    c = 5
+    print(tmg.node_x[::5].shape)
+    break
+
+    tck, fp, ier, msg = bisplrep(
+        tmg.node_x[::c],
+        tmg.node_y[::c],
+        S[::c],
+        kx = 3,
+        ky = 3,
+        s = tmg.number_of_nodes
+    )
+    print(msg)
+    surface = bisplev(tmg.node_x, tmg_node_y, tck)
+    plot_triangle_mesh(tmg, surface)
+    break
     
 
     state = ModelState.from_grid(tmg)
