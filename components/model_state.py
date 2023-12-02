@@ -131,7 +131,7 @@ class ModelState(eqx.Module):
                 raise AttributeError("Missing " + required + " at grid nodes.")
         
         for required in ['sliding_velocity']:
-            if required not in grid.at_node.keys():
+            if required not in grid.at_link.keys():
                 raise AttributeError("Missing " + required + " at grid links.")
 
         static = StaticGrid.from_grid(grid)
