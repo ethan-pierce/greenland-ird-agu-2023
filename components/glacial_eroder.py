@@ -18,6 +18,7 @@ class GlacialEroder(eqx.Module):
     bedrock_slope: jax.Array = eqx.field(converter = jnp.asarray, init = False)
     abrasion_coefficient: float = 4e-7 # m / a
     quarrying_coefficient: float = 2e-6 # m / a
+    diffusivity: float = 1e6 # tuning parameter
 
     def __post_init__(self):
         self.grid = self.state.grid
@@ -36,12 +37,21 @@ class GlacialEroder(eqx.Module):
             * jnp.abs(self.sliding_velocity)
         )
 
+    def calc_diffusion_rate(self):
+        """Calculate the rate of till diffusion."""
+        return (
+            self.grid.calc_flux_div_at_node(
+                self.diffusivity * self.grid.calc_grad_at_link(self.state.till_thickness)
+            )
+        )
+
     def update(self, dt: float):
         """Update the model state to reflect erosion over one time step of dt years."""
         abrasion = self.calc_abrasion_rate()
         quarrying = self.calc_quarrying_rate()
+        diffusion = self.calc_diffusion_rate()
 
-        total_erosion = (abrasion + quarrying) * dt
+        total_erosion = (abrasion + quarrying - diffusion) * dt
 
         updated_state = eqx.tree_at(
             lambda tree: tree.till_thickness, 
