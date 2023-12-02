@@ -127,10 +127,12 @@ class ModelState(eqx.Module):
             'geothermal_heat_flux', 
             'water_pressure'
         ]:
-            assert required in grid.at_node.keys()
+            if required not in grid.at_node.keys():
+                raise AttributeError("Missing " + required + " at grid nodes.")
         
         for required in ['sliding_velocity']:
-            assert required in grid.at_link.keys()
+            if required not in grid.at_node.keys():
+                raise AttributeError("Missing " + required + " at grid links.")
 
         static = StaticGrid.from_grid(grid)
 
