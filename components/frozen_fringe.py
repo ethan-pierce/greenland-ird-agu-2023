@@ -117,7 +117,7 @@ class FrozenFringe(eqx.Module):
     def update(self, dt: float):
         """Advance the model by one step of dt years."""
         real_growth_rate = jnp.minimum(
-            self.fringe_growth_rate,
+            self.fringe_growth_rate * self.state.sec_per_a,
             self.state.till_thickness
         )
 

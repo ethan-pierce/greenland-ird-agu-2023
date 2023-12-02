@@ -60,6 +60,19 @@ class StaticGrid(eqx.Module):
 
         return magnitude * jnp.cos(mapped_angle)
 
+    def map_value_at_max_node_to_link(self, controls, values):
+        """Map values field to links based on the maximum value of the controls field."""
+        ctrl_heads = controls[self.node_at_link_head]
+        ctrl_tails = controls[self.node_at_link_tail]
+        val_heads = values[self.node_at_link_head]
+        val_tails = values[self.node_at_link_tail]
+
+        return jnp.where(
+            ctrl_tails > ctrl_heads,
+            val_tails,
+            val_heads
+        )
+
     def sum_at_nodes(self, array):
         """At each node, sum incoming and outgoing values of an array defined on links."""
         return jnp.sum(self.link_dirs_at_node * array[self.links_at_node], axis = 1)

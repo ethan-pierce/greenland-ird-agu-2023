@@ -21,7 +21,7 @@ import matplotlib.pyplot as plt
 from landlab import RasterModelGrid
 from components import ModelState, GlacialEroder, FrozenFringe
 from components.model_state import initialize_state_from_grid
-from utils import StaticGrid, TVDAdvection
+from utils import StaticGrid, TVDAdvection, UpwindAdvection
 from utils.static_grid import freeze_grid
 from utils.plotting import plot_links, plot_triangle_mesh
 
@@ -91,6 +91,7 @@ def update(state, dt: float):
     state = eroder.update(dt).state
 
     fringe = FrozenFringe(state)
+    state = fringe.update(dt).state
 
     return state
 
@@ -107,8 +108,8 @@ with open('./examples/ird/landlab_grids.pickle', 'rb') as g:
 glacier = 'rolige-brae'
 state = models[glacier]
 
-for i in range(100):
-    state = update(state, dt = 1.0)
+for i in range(10):
+    state = update(state, dt = 0.1)
 
 plot_triangle_mesh(grids[glacier], state.till_thickness, subplots_args = {'figsize': (18, 6)})
 
