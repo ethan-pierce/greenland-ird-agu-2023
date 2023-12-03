@@ -68,9 +68,7 @@ class StaticGrid(eqx.Module):
         val_tails = values[self.node_at_link_tail]
 
         return jnp.where(
-            ctrl_tails > ctrl_heads,
-            val_tails,
-            val_heads
+            ctrl_tails > ctrl_heads, val_tails, val_heads
         )
 
     def sum_at_nodes(self, array):

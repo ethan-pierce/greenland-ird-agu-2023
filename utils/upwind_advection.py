@@ -22,7 +22,7 @@ class UpwindAdvection(eqx.Module):
         )
         flux = upwind_field * self.velocity
 
-        return self.grid.calc_flux_div_at_node(flux)
+        return -self.grid.calc_flux_div_at_node(flux)
 
     def update(self, dt: float):
         """Run one advection step and return the updated field."""

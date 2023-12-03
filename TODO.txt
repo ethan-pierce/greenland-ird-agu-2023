@@ -1,5 +1,4 @@
-1. Fix fringe-till exchange
-2. Implement adaptive time steps for fringe update
-3. Test upwind advection is stable
-4. Add advection to update routine
-5. Timeit
+1. Implement adaptive time steps for fringe update
+2. Test upwind advection is stable
+3. Add advection to update routine
+4. Timeit

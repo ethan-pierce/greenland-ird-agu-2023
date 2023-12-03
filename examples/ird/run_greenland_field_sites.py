@@ -16,7 +16,7 @@ from scipy.interpolate import bisplrep, bisplev
 
 import jax
 import jax.numpy as jnp
-import matplotlib.pyplot as plt
+import equinox as eqx
 
 from landlab import RasterModelGrid
 from components import ModelState, GlacialEroder, FrozenFringe
@@ -93,6 +93,20 @@ def update(state, dt: float):
     fringe = FrozenFringe(state)
     state = fringe.update(dt).state
 
+    advect = UpwindAdvection(
+        state.grid, 
+        state.fringe_thickness, 
+        state.surface_elevation, 
+        state.sliding_velocity
+    )
+    updated_fringe = advect.update(dt)
+
+    state = eqx.tree_at(
+        lambda tree: tree.fringe_thickness,
+        state,
+        updated_fringe
+    )
+
     return state
 
 ######################
@@ -111,7 +125,7 @@ state = models[glacier]
 for i in range(1000):
     state = update(state, dt = 0.01)
 
-plot_triangle_mesh(grids[glacier], state.till_thickness, subplots_args = {'figsize': (18, 6)})
+plot_triangle_mesh(grids[glacier], state.fringe_thickness, subplots_args = {'figsize': (18, 6)})
 
 ########################
 # Step 4: Save results #

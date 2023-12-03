@@ -122,7 +122,7 @@ class FrozenFringe(eqx.Module):
         real_growth = jnp.where(
             self.fringe_growth_rate > 0,
             jnp.minimum(max_growth, self.state.till_thickness),
-            -jnp.minimum(-max_growth, -self.state.fringe_thickness)
+            jnp.maximum(max_growth, -self.state.fringe_thickness)
         )
 
         fringe_thickness = self.state.fringe_thickness + real_growth
@@ -138,7 +138,7 @@ class FrozenFringe(eqx.Module):
             fringe_thickness
         )
 
-        till_thickness = self.state.till_thickness - real_growth
+        till_thickness = self.state.till_thickness - (real_growth + self.state.min_fringe_thickness)
         till_thickness = jnp.where(till_thickness < 0, 0, till_thickness)
 
         updated_state = eqx.tree_at(
