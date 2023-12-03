@@ -13,6 +13,7 @@ import xarray as xr
 import rioxarray as rxr
 import geopandas as gpd
 from scipy.interpolate import bisplrep, bisplev
+import matplotlib.pyplot as plt
 
 import jax
 import jax.numpy as jnp
@@ -119,8 +120,15 @@ with open('./examples/ird/initial_conditions.pickle', 'rb') as f:
 with open('./examples/ird/landlab_grids.pickle', 'rb') as g:
     grids = pickle.load(g)
 
-glacier = 'rolige-brae'
-state = models[glacier]
+for glacier, state in models.items():
+    print(glacier)
+    print(np.count_nonzero(state.node_is_terminus))
+    print(state.length_of_terminus)
+    
+    plt.scatter(grids[glacier].node_x, grids[glacier].node_y, c = state.node_is_terminus)
+    plt.show()
+
+quit()
 
 for i in range(3000):
     state = update(state, dt = 0.1)
@@ -132,3 +140,4 @@ plot_triangle_mesh(grids[glacier], state.fringe_thickness, subplots_args = {'fig
 ########################
 # Step 4: Save results #
 ########################
+

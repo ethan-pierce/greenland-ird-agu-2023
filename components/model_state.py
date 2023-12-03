@@ -49,6 +49,7 @@ class ModelState(eqx.Module):
     bedrock_elevation: jax.Array = eqx.field(converter = jnp.asarray, init = False)
     bedrock_slope: jax.Array = eqx.field(converter = jnp.asarray, init = False)
     node_is_terminus: jax.Array = eqx.field(converter = jnp.asarray, init = False)
+    length_of_terminus: float = eqx.field(init = False)
     ice_mask: jax.Array = eqx.field(converter = jnp.asarray, init = False)
 
     # Ice dynamics
@@ -89,8 +90,23 @@ class ModelState(eqx.Module):
         self.surface_slope = self.grid.calc_slope_at_node(self.surface_elevation)
         self.bedrock_elevation = self.surface_elevation - self.ice_thickness
         self.bedrock_slope = self.grid.calc_slope_at_node(self.bedrock_elevation)
+
+        interior_neighbor_elevation = jnp.min(
+            self.surface_elevation[self.grid.adjacent_nodes_at_node]
+        )
         self.node_is_terminus = jnp.where(
-            (self.grid.status_at_node != 0) & (self.bedrock_elevation < 0), 1, 0
+            (self.grid.status_at_node != 0) &
+            (self.surface_elevation < interior_neighbor_elevation),
+            1,
+            0
+        )
+
+        cross_terminus_links = (
+            self.node_is_terminus[self.grid.node_at_link_head] 
+            * self.node_is_terminus[self.grid.node_at_link_tail]
+        )
+        self.length_of_terminus = jnp.sum(
+            jnp.where(cross_terminus_links, self.grid.length_of_link, 0.0)
         )
         self.ice_mask = jnp.where(self.ice_thickness > self.min_ice_thickness, 1, 0)
         self.overburden_pressure = (

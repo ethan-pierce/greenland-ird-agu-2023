@@ -26,6 +26,7 @@ class StaticGrid(eqx.Module):
     length_of_face: jax.Array = eqx.field(converter = jnp.asarray)
     area_of_patch: jax.Array = eqx.field(converter = jnp.asarray)
     cell_area_at_node: jax.Array = eqx.field(converter = jnp.asarray)
+    adjacent_nodes_at_node: jax.Array = eqx.field(converter = jnp.asarray)
 
     # Boundary conditions
     core_nodes: jax.Array = eqx.field(converter = jnp.asarray)
