@@ -122,8 +122,10 @@ with open('./examples/ird/landlab_grids.pickle', 'rb') as g:
 glacier = 'rolige-brae'
 state = models[glacier]
 
-for i in range(1000):
-    state = update(state, dt = 0.01)
+for i in range(3000):
+    state = update(state, dt = 0.1)
+    if i % 100 == 0:
+        print(i)
 
 plot_triangle_mesh(grids[glacier], state.fringe_thickness, subplots_args = {'figsize': (18, 6)})
 
