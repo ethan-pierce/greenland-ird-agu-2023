@@ -91,7 +91,7 @@ class ModelState(eqx.Module):
         self.bedrock_elevation = self.surface_elevation - self.ice_thickness
         self.bedrock_slope = self.grid.calc_slope_at_node(self.bedrock_elevation)
 
-        interior_neighbor_elevation = jnp.min(
+        interior_neighbor_elevation = jnp.mean(
             self.surface_elevation[self.grid.adjacent_nodes_at_node]
         )
         self.node_is_terminus = jnp.where(
@@ -142,7 +142,6 @@ class ModelState(eqx.Module):
             self.effective_pressure * jnp.tan(self.till_friction_angle) * velocity_factor,
             0.0
         )
-
 
 # IMPORTANT: this needs to stay as a top-level function, not a class function.
 # (Because jax.jit will not accept strings as valid JAX types.)

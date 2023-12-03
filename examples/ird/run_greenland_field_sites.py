@@ -31,6 +31,11 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--gen_mesh', default = False, action = 'store_true')
 args = parser.parse_args()
 
+# Bounds for each terminus, in the form [xmin, xmax, ymin, ymax]
+bounds = {
+    'rolige-brae': [6.08e5, 6.3e5, -2.035e6, -2.03e6]
+}
+
 #####################
 # Step 1: Load data #
 #####################
@@ -110,6 +115,18 @@ def update(state, dt: float):
 
     return state
 
+def constrain_terminus(state, xmin, xmax, ymin, ymax):
+    node_is_terminus = jnp.where(
+        state.node_is_terminus
+        & (state.grid.node_x > xmin)
+        & (state.grid.node_x < xmax)
+        & (state.grid.node_y > ymin)
+        & (state.grid.node_y < ymax),
+        1,
+        0
+    )
+    return node_is_terminus
+
 ######################
 # Step 3: Run models #
 ######################
@@ -122,11 +139,9 @@ with open('./examples/ird/landlab_grids.pickle', 'rb') as g:
 
 for glacier, state in models.items():
     print(glacier)
-    print(np.count_nonzero(state.node_is_terminus))
-    print(state.length_of_terminus)
-    
-    plt.scatter(grids[glacier].node_x, grids[glacier].node_y, c = state.node_is_terminus)
-    plt.show()
+    # terminus = constrain_terminus(state, bounds[glacier][0], bounds[glacier][1], bounds[glacier][2], bounds[glacier][3])
+
+    plot_triangle_mesh(grids[glacier], state.node_is_terminus, subplots_args = {'figsize': (18, 12)})
 
 quit()
 
