@@ -1,4 +1,0 @@
-1. Implement adaptive time steps for fringe update
-2. Test upwind advection is stable
-3. Add advection to update routine
-4. Timeit
