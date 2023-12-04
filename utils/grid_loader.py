@@ -208,6 +208,14 @@ class GridLoader:
 
         self.grid.add_field(ll_name, gridded, at="node")
 
+        opened.close()
+        clipped.close()
+        translated.close()
+        projected.close()
+        filled.close()
+        rescaled.close()
+        smoothed.close()
+
     def write_input_nc(
         self, 
         path_to_write: str,
@@ -296,6 +304,7 @@ def main():
     """Generate a mesh and add netCDF data."""
     from utils.plotting import plot_triangle_mesh
     import warnings
+
     warnings.filterwarnings("ignore")
 
     bedmachine = "/home/egp/repos/greenland-ird/data/ignore/BedMachineGreenland-v5.nc"
@@ -303,12 +312,15 @@ def main():
     geotherm = "/home/egp/repos/greenland-ird/data/ignore/geothermal_heat_flow_map_10km.nc"
     shapefiles = "/home/egp/repos/greenland-ird/data/basin-outlines/"
     paths = []
+
     for i in os.listdir('/home/egp/repos/greenland-ird/data/basin-outlines/CE/'):
         paths.append('CE/' + i)
     for i in os.listdir('/home/egp/repos/greenland-ird/data/basin-outlines/CW/'):
         paths.append('CW/' + i)
     for i in os.listdir('/home/egp/repos/greenland-ird/data/basin-outlines/SW/'):
         paths.append('SW/' + i)
+
+    paths = ['SW/kangiata-nunaata-sermia.geojson']
 
     for path in paths:
         glacier = path.split('/')[-1].replace('.geojson', '')
@@ -318,10 +330,12 @@ def main():
         tol = np.round(float(area) * 2e-8, 2)
         buffer = 250
 
-        if glacier == 'kangiata-nunaata-sermia':
+        if glacier in ['sermeq-avannarleq']:
+            q = 25
+        elif glacier in ['kangiata-nunaata-sermia']:
             q = 30
         else:
-            q = 26
+            q = 24
 
         if glacier in ['kista-dan-gletsjer', 'magga-dan-gletsjer']:
             buffer = tol
