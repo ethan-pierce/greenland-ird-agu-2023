@@ -33,7 +33,24 @@ args = parser.parse_args()
 
 # Bounds for each terminus, in the form [xmin, xmax, ymin, ymax]
 bounds = {
-    'rolige-brae': [6.08e5, 6.3e5, -2.035e6, -2.03e6]
+    'rolige-brae': [6.08e5, 6.3e5, -2.035e6, -2.03e6],
+    'sermeq-avannarleq': [-2.063e5, -1.94e5, -2.175e6, -2.17e6],
+    'charcot-gletscher': [5.438e5, 5.453e5, -1.8834e6, -1.8814e6],
+    'sydbrae': [6.917e5, 6.966e5, -2.05300e6, -2.0503e6],
+    'kangiata-nunaata-sermia': [-2.322e5, -2.2387e5, -2.8211e6, -2.81829e6],
+    'eielson-gletsjer': [[5.9432e5, 5.9806e5, -1.9938e6, -1.99107e6], [6.0470e5, 6.0975e5, -1.9721e6, -1.9684e6]],
+    'narsap-sermia': [-2.4817e5, -2.4318e5, -2.78049e6, -2.77618e6],
+    'kangilernata-sermia': [-2.0785e5, -2.0248e5, -2.19282e6, -2.1822e6],
+    'dode-brae': [5.86116e5, 5.84982e5, -2.0553e6, -2.057326e6],
+    'daugaard-jensen-gletsjer': [5.5327e5, 5.6091e5, -1.89852e6, -1.8912e6],
+    'vestfjord-gletsjer': [5.849e5, 5.8915e5, -2.064e6, -2.0616e6],
+    'sermeq-kullajeq': [-1.99773e5, -1.98032e5, -2.18107e6, -2.17603e6],
+    'bredegletsjer': [7.2777e5, 7.3204e5, -2.03134e6, -2.02869e6],
+    'magga-dan-gletsjer': [6.65261e5, 6.68950e5, -2.09014e6, -2.08383e6],
+    'graah-gletscher': [5.48122e5, 5.50237e5, -1.874439e6, -1.877166e6],
+    'akullersuup-sermia': [-2.29522e5, -2.26196e5, -2.816803e6, -2.813243e6],
+    'eqip-sermia': [-2.04326e5, -2.01153e5, -2.204225e6, -2.200172e6],
+    'kista-dan-gletsjer': [6.60337e5, 6.63701e5, -2.09062e6, -2.08841e6]
 }
 
 #####################
@@ -139,9 +156,15 @@ with open('./examples/ird/landlab_grids.pickle', 'rb') as g:
 
 for glacier, state in models.items():
     print(glacier)
-    # terminus = constrain_terminus(state, bounds[glacier][0], bounds[glacier][1], bounds[glacier][2], bounds[glacier][3])
 
-    plot_triangle_mesh(grids[glacier], state.node_is_terminus, subplots_args = {'figsize': (18, 12)})
+    if glacier == 'eielson-gletsjer':
+        terminus_a = constrain_terminus(state, bounds[glacier][0][0], bounds[glacier][0][1], bounds[glacier][0][2], bounds[glacier][0][3])
+        terminus_b = constrain_terminus(state, bounds[glacier][1][0], bounds[glacier][1][1], bounds[glacier][1][2], bounds[glacier][1][3])
+        terminus = terminus_a | terminus_b
+    else:
+        terminus = constrain_terminus(state, bounds[glacier][0], bounds[glacier][1], bounds[glacier][2], bounds[glacier][3])
+
+    plot_triangle_mesh(grids[glacier], terminus, subplots_args = {'figsize': (18, 12)})
 
 quit()
 
