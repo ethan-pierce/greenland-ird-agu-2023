@@ -168,16 +168,15 @@ for glacier, state in models.items():
     len_terminus = jnp.sum(jnp.where(cross_terminus_links, state.grid.length_of_link, 0.0))
     print(len_terminus)
 
-    plot_triangle_mesh(grids[glacier], state.grid.map_mean_of_links_to_node(state.sliding_velocity), subplots_args = {'figsize': (18, 12)})
+    fig = plot_triangle_mesh(grids[glacier], state.grid.map_mean_of_links_to_node(state.sliding_velocity), subplots_args = {'figsize': (18, 12)}, show = False)
+    plt.savefig('./examples/ird/sliding/' + glacier + '.png')
 
-quit()
+    for i in range(3000):
+        state = update(state, dt = 0.1)
 
-for i in range(3000):
-    state = update(state, dt = 0.1)
-    if i % 100 == 0:
-        print(i)
-
-plot_triangle_mesh(grids[glacier], state.fringe_thickness, subplots_args = {'figsize': (18, 6)})
+    print('Finished simulation for ' + glacier.replace('-', ' ').title())
+    fig = plot_triangle_mesh(grids[glacier], state.fringe_thickness, subplots_args = {'figsize': (18, 6)}, show = False)
+    plt.savefig('./examples/ird/fringe/' + glacier + '.png')
 
 ########################
 # Step 4: Save results #

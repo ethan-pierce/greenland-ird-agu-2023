@@ -1,2 +1,4 @@
 examples/ird/*.pickle
 examples/ird/meshes
+examples/ird/sliding
+examples/ird/fringe
