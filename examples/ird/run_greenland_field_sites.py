@@ -164,7 +164,15 @@ for glacier, state in models.items():
     else:
         terminus = constrain_terminus(state, bounds[glacier][0], bounds[glacier][1], bounds[glacier][2], bounds[glacier][3])
 
-    plot_triangle_mesh(grids[glacier], terminus, subplots_args = {'figsize': (18, 12)})
+    corners = state.grid.corners_at_face[state.grid.length_of_face == 0]
+    if len(corners) > 0:
+        zero_links = jnp.argwhere(state.grid.length_of_face[state.grid.face_at_link] == 0)
+        print(zero_links)
+
+    # cross_terminus_links = terminus[state.grid.node_at_link_head] * terminus[state.grid.node_at_link_tail]
+    # print(jnp.sum(jnp.where(cross_terminus_links, state.grid.length_of_link, 0.0)))
+
+    # plot_triangle_mesh(grids[glacier], state.grid.map_mean_of_links_to_node(state.sliding_velocity), subplots_args = {'figsize': (18, 12)})
 
 quit()
 

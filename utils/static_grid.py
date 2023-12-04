@@ -41,6 +41,7 @@ class StaticGrid(eqx.Module):
     # parallel_links_at_link: jax.Array = eqx.field(converter = jnp.asarray)
     face_at_link: jax.Array = eqx.field(converter = jnp.asarray)
     cell_at_node: jax.Array = eqx.field(converter = jnp.asarray)
+    corners_at_face: jax.Array = eqx.field(converter = jnp.asarray)
 
     def map_mean_of_links_to_node(self, array):
         """Map an array of values from links to nodes."""

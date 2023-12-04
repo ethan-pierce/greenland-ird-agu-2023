@@ -318,6 +318,11 @@ def main():
         tol = np.round(float(area) * 2e-8, 2)
         buffer = 250
 
+        if glacier == 'kangiata-nunaata-sermia':
+            q = 30
+        else:
+            q = 26
+
         if glacier in ['kista-dan-gletsjer', 'magga-dan-gletsjer']:
             buffer = tol
         if glacier in ['sermeq-kullajeq']:
@@ -331,10 +336,12 @@ def main():
             centered = False, 
             generate_grid = True, 
             max_area = int(area / 10000), 
-            quality = 20,
+            quality = q,
             buffer = buffer,
             tolerance = tol
         )
+
+        print(loader.grid.number_of_faces - np.count_nonzero(loader.grid.length_of_face))
 
         print('Mesh nodes: ', loader.grid.number_of_nodes)
         print('Mesh links: ', loader.grid.number_of_links)
@@ -426,7 +433,7 @@ def main():
         loader.grid.save('/home/egp/repos/glacierbento/examples/ird/meshes/' + glacier + '.grid', clobber = True)
 
         # QC
-        plot_triangle_mesh(loader.grid, loader.grid.at_node['smoothed_surface'][:], subplots_args = {'figsize': (18, 6)})
+        # plot_triangle_mesh(loader.grid, loader.grid.at_node['smoothed_surface'][:], subplots_args = {'figsize': (18, 6)})
         # plot_triangle_mesh(loader.grid, loader.grid.at_node['surface_velocity_x'][:], subplots_args = {'figsize': (18, 6)})
 
         print('Finished loading data for ' + glacier.replace('-', ' ').capitalize())
