@@ -20,9 +20,19 @@ class UpwindAdvection(eqx.Module):
             self.control,
             self.field
         )
-        flux = upwind_field * self.velocity
+        flux = upwind_field * self.velocity * self.grid.length_of_face[self.grid.face_at_link] / 2
 
         return -self.grid.calc_flux_div_at_node(flux)
+    
+    def calc_div_grad_form(self) -> jax.Array:
+        """Calculate the div form: u dot grad(h) + h div(u)."""
+        div = self.grid.calc_flux_div_at_node(self.velocity * self.grid.length_of_face[self.grid.face_at_link])
+        deformation = self.field * div
+
+        grad = self.velocity * self.grid.calc_grad_at_link(self.field)
+        advection = self.grid.sum_at_nodes(grad)
+
+        return advection + deformation
 
     def update(self, dt: float):
         """Run one advection step and return the updated field."""

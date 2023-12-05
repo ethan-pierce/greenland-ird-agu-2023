@@ -86,7 +86,7 @@ if args.gen_mesh:
         Ub = np.where(
             np.abs(Ud) > np.abs(Us),
             0.0,
-            np.sign(Us) * (np.abs(Us) - np.abs(Ud))
+            np.sign(Ud) * (np.abs(Us) - np.abs(Ud))
         )
 
         tmg.add_field('sliding_velocity', Ub, at = 'link')
@@ -154,8 +154,13 @@ with open('./examples/ird/initial_conditions.pickle', 'rb') as f:
 with open('./examples/ird/landlab_grids.pickle', 'rb') as g:
     grids = pickle.load(g)
 
+sediment_fluxes = {key: [] for key in models.keys()}
+proximal_fluxes = {key: [] for key in models.keys()}
+ice_fluxes = {key: 0.0 for key in models.keys()}
+
 for glacier, state in models.items():
-    print(glacier)
+    print('Simulating... ' + glacier.replace('-', ' ').title())
+    title = glacier.replace('-', ' ').title()
 
     if glacier == 'eielson-gletsjer':
         terminus_a = constrain_terminus(state, bounds[glacier][0][0], bounds[glacier][0][1], bounds[glacier][0][2], bounds[glacier][0][3])
@@ -164,21 +169,103 @@ for glacier, state in models.items():
     else:
         terminus = constrain_terminus(state, bounds[glacier][0], bounds[glacier][1], bounds[glacier][2], bounds[glacier][3])
 
+    adj_terminus = jnp.unique(state.grid.adjacent_nodes_at_node[terminus == 1])
+    adj_terminus = adj_terminus.at[adj_terminus != -1].get()
     cross_terminus_links = terminus[state.grid.node_at_link_head] * terminus[state.grid.node_at_link_tail]
     len_terminus = jnp.sum(jnp.where(cross_terminus_links, state.grid.length_of_link, 0.0))
-    print(len_terminus)
 
-    fig = plot_triangle_mesh(grids[glacier], state.grid.map_mean_of_links_to_node(state.sliding_velocity), subplots_args = {'figsize': (18, 12)}, show = False)
-    plt.savefig('./examples/ird/sliding/' + glacier + '.png')
+    ice_fluxes[glacier] = jnp.sum(
+        state.ice_thickness[terminus == 1]
+        * jnp.mean(state.grid.length_of_link[cross_terminus_links])
+        * jnp.max(jnp.abs(state.sliding_velocity))
+        * state.ice_density
+        * 1e-12
+    )
+    print('Ice flux = ', ice_fluxes[glacier], ' Gt^3 a^-1')
 
-    for i in range(3000):
-        state = update(state, dt = 0.1)
+    xish = ((jnp.abs(jnp.max(state.grid.node_x) - jnp.min(state.grid.node_x)))) / 1e4
+    yish = ((jnp.abs(jnp.max(state.grid.node_y) - jnp.min(state.grid.node_y)))) / 1e4
+    figsize = (xish, yish)
+    plt.rcParams.update({'font.size': np.sqrt(xish**2 + yish**2)})
+
+    fig = plot_triangle_mesh(grids[glacier], state.ice_thickness, subplots_args = {'figsize': figsize}, show = False)
+    plt.title(title + ' ice_thickness (m)')
+    plt.savefig('./examples/ird/icethk/' + glacier + '.png', dpi = 300)
+    plt.close('all')
+
+    fig = plot_triangle_mesh(grids[glacier], state.grid.map_mean_of_links_to_node(state.sliding_velocity), subplots_args = {'figsize': figsize}, show = False)
+    plt.title(title + ' sliding velocity (m a$^{-1}$)')
+    plt.savefig('./examples/ird/sliding/' + glacier + '.png', dpi = 300)
+    plt.close('all')
+
+    eroder = GlacialEroder(state)
+    fig = plot_triangle_mesh(grids[glacier], eroder.calc_abrasion_rate() + eroder.calc_quarrying_rate(), subplots_args = {'figsize': figsize}, show = False)
+    plt.title(title + ' erosion rate (m a$^{-1}$)')
+    plt.savefig('./examples/ird/erosion/' + glacier + '.png', dpi = 300)
+    plt.close('all')
+
+    dt = 0.1 * jnp.nanmin(jnp.where(
+        state.sliding_velocity != 0,
+        state.grid.length_of_link / jnp.abs(state.sliding_velocity),
+        np.nan
+    ))
+    print('dt = ', dt)
+
+    time_elapsed = 0.0
+    n_years = 500
+
+    for i in range(int(n_years / dt)):
+        state = update(state, dt)
+        state = eqx.tree_at(
+            lambda tree: tree.fringe_thickness,
+            state,
+            jnp.where(
+                state.fringe_thickness == jnp.max(state.fringe_thickness),
+                jnp.percentile(state.fringe_thickness, 99),
+                state.fringe_thickness
+            )
+        )
+
+        time_elapsed += dt
+        if time_elapsed > n_years:
+            print('Total time elapsed: ', time_elapsed)
+            break
+
+        sediment_fluxes[glacier].append(
+            jnp.sum(state.fringe_thickness[terminus == 1] - state.min_fringe_thickness) * len_terminus * 0.1 * 2700
+        )
+
+        proximal_fluxes[glacier].append(
+            jnp.sum(state.fringe_thickness[adj_terminus] - state.min_fringe_thickness) * len_terminus * 0.1 * 2700
+        )
 
     print('Finished simulation for ' + glacier.replace('-', ' ').title())
-    fig = plot_triangle_mesh(grids[glacier], state.fringe_thickness, subplots_args = {'figsize': (18, 6)}, show = False)
-    plt.savefig('./examples/ird/fringe/' + glacier + '.png')
 
-########################
-# Step 4: Save results #
-########################
+    fig = plot_triangle_mesh(
+        grids[glacier], 
+        state.fringe_thickness, 
+        subplots_args = {'figsize': figsize}, 
+        show = False, 
+        set_clim = {'vmax': jnp.percentile(state.fringe_thickness, 99)}
+    )
+    plt.title(title + ' fringe thickness (m)')
+    plt.savefig('./examples/ird/fringe/' + glacier + '.png', dpi = 300)
+    plt.close('all')
 
+    fig = plot_triangle_mesh(
+        grids[glacier], 
+        state.till_thickness, 
+        subplots_args = {'figsize': figsize}, 
+        show = False, 
+        set_clim = {'vmax': jnp.percentile(state.till_thickness, 99)}
+    )
+    plt.title(title + ' till thickness (m)')
+    plt.savefig('./examples/ird/till/' + glacier + '.png', dpi = 300)
+    plt.close('all')
+
+with open('./examples/ird/flux_results.pickle') as f:
+    pickle.dump((sediment_fluxes, proximal_fluxes, ice_fluxes), f)
+
+#############################
+# Step 4: Interpret results #
+#############################
