@@ -212,19 +212,10 @@ for glacier, state in models.items():
     print('dt = ', dt)
 
     time_elapsed = 0.0
-    n_years = 500
+    n_years = 200
 
     for i in range(int(n_years / dt)):
         state = update(state, dt)
-        state = eqx.tree_at(
-            lambda tree: tree.fringe_thickness,
-            state,
-            jnp.where(
-                state.fringe_thickness == jnp.max(state.fringe_thickness),
-                jnp.percentile(state.fringe_thickness, 99),
-                state.fringe_thickness
-            )
-        )
 
         time_elapsed += dt
         if time_elapsed > n_years:
@@ -263,9 +254,5 @@ for glacier, state in models.items():
     plt.savefig('./examples/ird/till/' + glacier + '.png', dpi = 300)
     plt.close('all')
 
-with open('./examples/ird/flux_results.pickle') as f:
+with open('./examples/ird/flux_results.pickle', 'wb') as f:
     pickle.dump((sediment_fluxes, proximal_fluxes, ice_fluxes), f)
-
-#############################
-# Step 4: Interpret results #
-#############################

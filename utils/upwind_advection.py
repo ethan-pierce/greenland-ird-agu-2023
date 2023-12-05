@@ -20,8 +20,7 @@ class UpwindAdvection(eqx.Module):
             self.control,
             self.field
         )
-        flux = upwind_field * self.velocity * self.grid.length_of_face[self.grid.face_at_link] / 2
-
+        flux = upwind_field * self.velocity
         return -self.grid.calc_flux_div_at_node(flux)
     
     def calc_div_grad_form(self) -> jax.Array:
