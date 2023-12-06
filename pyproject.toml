@@ -19,6 +19,7 @@ equinox = "^0.11.2"
 pytest = "^7.4.3"
 black = "^23.11.0"
 landlab = { git = "git@github.com:ethan-pierce/landlab.git", branch = "ethan-pierce/fix_links_at_patch_bug"}
+cmcrameri = "^1.7"
 
 [build-system]
 requires = ["poetry-core"]

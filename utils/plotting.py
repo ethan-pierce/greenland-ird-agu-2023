@@ -14,6 +14,7 @@ def plot_triangle_mesh(
     cmap = plt.cm.jet, 
     subplots_args = None,
     set_clim = False,
+    norm = None,
     show = True
 ):
     """Plot a field defined on an unstructured mesh."""
@@ -80,7 +81,10 @@ def plot_triangle_mesh(
     hulls = [shapely.get_coordinates(shapely.Polygon(i).convex_hull) for i in coords]
     polys = [plt.Polygon(shp) for shp in hulls]
 
-    collection = matplotlib.collections.PatchCollection(polys, cmap=cmap)
+    if norm is None:
+        norm = matplotlib.colors.Normalize(vmin = np.min(field), vmax = np.max(field))
+
+    collection = matplotlib.collections.PatchCollection(polys, cmap=cmap, norm=norm)
     collection.set_array(values)
 
     if set_clim is not False:

@@ -187,6 +187,22 @@ click = ">=4.0"
 test = ["pytest-cov"]
 
 [[package]]
+name = "cmcrameri"
+version = "1.7"
+description = "Perceptually uniform colormaps by Fabio Crameri"
+optional = false
+python-versions = ">=3.6"
+files = [
+    {file = "cmcrameri-1.7-py3-none-any.whl", hash = "sha256:97f9ae687253bfdaab06081172db4ba14c6638eb3ca0a6c82a5874e99b6ee344"},
+    {file = "cmcrameri-1.7.tar.gz", hash = "sha256:581f459809ce1951bbd305b7992d56185bab33a79efd40059d414365ef97abfe"},
+]
+
+[package.dependencies]
+matplotlib = "*"
+numpy = "*"
+packaging = "*"
+
+[[package]]
 name = "colorama"
 version = "0.4.6"
 description = "Cross-platform colored terminal text."
@@ -673,31 +689,12 @@ files = [
 
 [[package]]
 name = "landlab"
-version = "2.7.0"
+version = "2.7.1.dev0"
 description = "Open-source Python package for numerical modeling of Earth surface dynamics."
 optional = false
 python-versions = ">=3.10"
-files = [
-    {file = "landlab-2.7.0-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:ca33553f1b75b3fdb6b8fe444e58a06b476ec37f3f4170db22e0d612300c05d4"},
-    {file = "landlab-2.7.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:070564128ae91485222c101ef9cba9f1024263954842d848a235e48f9be7de9a"},
-    {file = "landlab-2.7.0-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:d4a9b2318af331f1c3a70588334663e77eac9a4a8c4087716d59e5b06e560023"},
-    {file = "landlab-2.7.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:0e66f25c1168585d4c0e0596f62edbcd7734e323bf9692af8b80e91a3a504b41"},
-    {file = "landlab-2.7.0-cp310-cp310-win32.whl", hash = "sha256:81c12c8a0e1f78b5a4b668558924333514519ab112c9393aec9aaecb41b96a53"},
-    {file = "landlab-2.7.0-cp310-cp310-win_amd64.whl", hash = "sha256:ea5a8ac12764116310bf8c20f49fbdb8957907c2d6e06db9d46481356cc306af"},
-    {file = "landlab-2.7.0-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:a9f25c4d4bfd5c7dc0c962246d56306170263f90ad8b6de5b63b2ca2db4bb407"},
-    {file = "landlab-2.7.0-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:4107400b118b472a4e5520c24f0d6082b3bbfecd504f5cdb68a8aa495002bd36"},
-    {file = "landlab-2.7.0-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:7d0dddfcfbbc43374044ba9455d3f0fd09d725da17e436a51adfb3b888e2e56c"},
-    {file = "landlab-2.7.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:152b18f060601b2404a7190e16ef407f0da8f7bcc150136f411f0fac3b48fdc7"},
-    {file = "landlab-2.7.0-cp311-cp311-win32.whl", hash = "sha256:4590d7be8b73bdc3f9ea244b16581e14bee7d493f6afe009b12ca42ab7b67693"},
-    {file = "landlab-2.7.0-cp311-cp311-win_amd64.whl", hash = "sha256:839d522360d366a411d01e2d0607a61955e6f75527010edd86f97d4f730f0225"},
-    {file = "landlab-2.7.0-cp312-cp312-macosx_10_9_x86_64.whl", hash = "sha256:5ab14a7205ce25204ac0080182645048c8fbc84ac94d8d078b44156224a7e418"},
-    {file = "landlab-2.7.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:1966bdfac73cbe892b87255697c5b43a85c045da5e0e5543712afd8f5086a4d2"},
-    {file = "landlab-2.7.0-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:a38333d7fba6db194779d84425621c26e62f810d088ba39cc2977382828db882"},
-    {file = "landlab-2.7.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:2eaeceb7c796ad8bf6cb07ac6d5715224b8be2e194ca49d12561c31bb412ad8a"},
-    {file = "landlab-2.7.0-cp312-cp312-win32.whl", hash = "sha256:950363da906b47b70eb82c68fa2c0804292c415e453e4c75ea1c0437e628b727"},
-    {file = "landlab-2.7.0-cp312-cp312-win_amd64.whl", hash = "sha256:d7bd8d11df97c65b60ba5d71d7754c4eb81456ca5c74b2d7a11fff4b59160d5d"},
-    {file = "landlab-2.7.0.tar.gz", hash = "sha256:68e2eb5d1a67c5ef9e2ef0ece129869254091f1d2462b1ac0228e4cff9d262f0"},
-]
+files = []
+develop = false
 
 [package.dependencies]
 bmipy = "*"
@@ -715,6 +712,12 @@ xarray = ">=0.16"
 [package.extras]
 dev = ["nox"]
 testing = ["coveralls", "hypothesis", "pytest", "pytest-cov", "pytest-datadir", "pytest-xdist"]
+
+[package.source]
+type = "git"
+url = "git@github.com:ethan-pierce/landlab.git"
+reference = "ethan-pierce/fix_links_at_patch_bug"
+resolved_reference = "0ce3f81a47e86954e03330eea62f35f59222a06c"
 
 [[package]]
 name = "markdown-it-py"
@@ -1775,4 +1778,4 @@ viz = ["matplotlib", "nc-time-axis", "seaborn"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.13"
-content-hash = "d1cfedddb4b75489aa97ee45634f818478e477c37ce376944d8b1d820dd30988"
+content-hash = "895eff6bfc4e2a60a6e049d1fde49426887dae4f60f42835e1127937545bbfac"
