@@ -15,6 +15,7 @@ def plot_triangle_mesh(
     subplots_args = None,
     set_clim = False,
     norm = None,
+    cbar_ticks = None,
     show = True
 ):
     """Plot a field defined on an unstructured mesh."""
@@ -93,7 +94,10 @@ def plot_triangle_mesh(
     im = ax.add_collection(collection)
     ax.autoscale()
 
-    plt.colorbar(im)
+    if cbar_ticks is not None:
+        plt.colorbar(im, ticks = cbar_ticks)
+    else:
+        plt.colorbar(im)
 
     if show:
         plt.show()

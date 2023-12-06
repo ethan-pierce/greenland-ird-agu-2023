@@ -105,7 +105,8 @@ discharge = {key: discharge_data[str(val)].iloc[2666:].mean() for key, val in di
 results = {
     'glacier': [], 'region': [], 'N_scalar': [], 'ice_flux': [], 
     'boundary_flux': [], 'proximal_flux': [], 'sediment_flux': [], 
-    'max_velocity': [], 'max_pressure': [], 'drainage_area': []
+    'max_velocity': [], 'max_pressure': [], 'drainage_area': [],
+    'mean_fringe': [], 'med_fringe': []
 }
 
 #####################
@@ -202,7 +203,7 @@ def constrain_terminus(state, xmin, xmax, ymin, ymax):
 with open('./examples/ird/landlab_grids.pickle', 'rb') as g:
     grids = pickle.load(g)
 
-for Nc in [0.95, 0.9, 0.8, 0.6]:
+for Nc in [0.95, 0.9, 0.8, 0.7, 0.6]:
     print('Water pressure = ', Nc, ' * overburden pressure.')
 
     for glacier, grid in grids.items():
@@ -249,17 +250,33 @@ for Nc in [0.95, 0.9, 0.8, 0.6]:
         xish = ((jnp.abs(jnp.max(state.grid.node_x) - jnp.min(state.grid.node_x)))) / 1e4
         yish = ((jnp.abs(jnp.max(state.grid.node_y) - jnp.min(state.grid.node_y)))) / 1e4
         figsize = (xish, yish)
-        plt.rcParams.update({'font.size': np.sqrt(xish**2 + yish**2)})
 
-        fig = plot_triangle_mesh(grids[glacier], state.ice_thickness, subplots_args = {'figsize': figsize}, show = False, cmap = cmc.batlow)
-        plt.title(title + ' ice thickness (m)')
-        plt.tick_params(axis = 'x', rotation = 25)
-        plt.tick_params(axis = 'y', rotation = 25)
-        plt.xlabel('Grid x-coordinate')
-        plt.ylabel('Grid y-coordinate')
-        plt.tight_layout()
-        plt.savefig('./examples/ird/icethk/' + glacier + '_' + str(int(Nc * 100)) + '.png', dpi = 300)
-        plt.close('all')
+        if glacier == 'magga-dan-gletsjer':
+            figsize = (yish, xish * 1.5)
+
+        plt.rcParams.update({'font.size': np.sqrt(xish**2 + yish**2)})
+        plt.rcParams.update({'axes.linewidth': np.sqrt(xish**2 + yish**2) / 10})
+
+        if Nc == 0.95:
+            fig = plot_triangle_mesh(grids[glacier], state.ice_thickness, subplots_args = {'figsize': figsize}, show = False, cmap = cmc.batlow)
+            plt.title(title + ' ice thickness (m)')
+            plt.tick_params(axis = 'x', rotation = 25)
+            plt.tick_params(axis = 'y', rotation = 25)
+            plt.xlabel('Grid x-coordinate')
+            plt.ylabel('Grid y-coordinate')
+            plt.tight_layout()
+            plt.savefig('./examples/ird/icethk/' + glacier + '.png', dpi = 300)
+            plt.close('all')
+
+            fig = plot_triangle_mesh(grids[glacier], state.grid.map_mean_of_links_to_node(jnp.abs(state.sliding_velocity)), subplots_args = {'figsize': figsize}, show = False, cmap = cmc.batlow)
+            plt.title(title + ' sliding velocity (m a$^{-1}$)')
+            plt.tick_params(axis = 'x', rotation = 25)
+            plt.tick_params(axis = 'y', rotation = 25)
+            plt.xlabel('Grid x-coordinate')
+            plt.ylabel('Grid y-coordinate')
+            plt.tight_layout()
+            plt.savefig('./examples/ird/sliding/' + glacier + '.png', dpi = 300)
+            plt.close('all')
 
         eroder = GlacialEroder(state)
         fig = plot_triangle_mesh(grids[glacier], eroder.calc_abrasion_rate() + eroder.calc_quarrying_rate(), subplots_args = {'figsize': figsize}, show = False, cmap = cmc.batlow, norm = matplotlib.colors.LogNorm())
@@ -272,16 +289,6 @@ for Nc in [0.95, 0.9, 0.8, 0.6]:
         plt.savefig('./examples/ird/erosion/' + glacier + '_' + str(int(Nc * 100)) + '.png', dpi = 300)
         plt.close('all')
 
-        fig = plot_triangle_mesh(grids[glacier], state.grid.map_mean_of_links_to_node(jnp.abs(state.sliding_velocity)), subplots_args = {'figsize': figsize}, show = False, cmap = cmc.batlow)
-        plt.title(title + ' sliding velocity (m a$^{-1}$)')
-        plt.tick_params(axis = 'x', rotation = 25)
-        plt.tick_params(axis = 'y', rotation = 25)
-        plt.xlabel('Grid x-coordinate')
-        plt.ylabel('Grid y-coordinate')
-        plt.tight_layout()
-        plt.savefig('./examples/ird/sliding/' + glacier + '_' + str(int(Nc * 100)) + '.png', dpi = 300)
-        plt.close('all')
-
         fig = plot_triangle_mesh(grids[glacier], state.melt_rate, subplots_args = {'figsize': figsize}, show = False, cmap = cmc.batlow)
         plt.title(title + ' melt rate (m a$^{-1}$)')
         plt.tick_params(axis = 'x', rotation = 25)
@@ -292,7 +299,7 @@ for Nc in [0.95, 0.9, 0.8, 0.6]:
         plt.savefig('./examples/ird/melt/' + glacier + '_' + str(int(Nc * 100)) + '.png', dpi = 300)
         plt.close('all')
 
-        dt = 0.1 * jnp.nanmin(jnp.where(
+        dt = 0.05 * jnp.nanmin(jnp.where(
             state.sliding_velocity != 0,
             state.grid.length_of_link / jnp.abs(state.sliding_velocity),
             np.nan
@@ -300,7 +307,7 @@ for Nc in [0.95, 0.9, 0.8, 0.6]:
         print('dt = ', dt)
 
         time_elapsed = 0.0
-        n_years = 200
+        n_years = 0.1
 
         for i in range(int(n_years / dt)):
             state = update(state, dt)
@@ -312,7 +319,17 @@ for Nc in [0.95, 0.9, 0.8, 0.6]:
 
         print('Finished simulation for ' + glacier.replace('-', ' ').title())
 
-        fig = plot_triangle_mesh(grids[glacier], state.fringe_thickness, subplots_args = {'figsize': figsize}, show = False, cmap = cmc.batlow, set_clim = {'vmax': jnp.percentile(state.fringe_thickness, 99.5)})
+        patch_vals = grids[glacier].map_mean_of_patch_nodes_to_patch(state.fringe_thickness)
+        vmax = jnp.percentile(patch_vals, 99.5)
+
+        fig = plot_triangle_mesh(
+            grids[glacier], 
+            state.fringe_thickness, 
+            subplots_args = {'figsize': figsize}, 
+            show = False, 
+            cmap = cmc.batlow,
+            set_clim = {'vmin': 0, 'vmax': vmax}
+        )
         plt.title(title + ' fringe thickness (m)')
         plt.tick_params(axis = 'x', rotation = 25)
         plt.tick_params(axis = 'y', rotation = 25)
@@ -342,6 +359,8 @@ for Nc in [0.95, 0.9, 0.8, 0.6]:
         results['max_velocity'].append(float(jnp.max(state.sliding_velocity)))
         results['max_pressure'].append(float(jnp.max(state.effective_pressure)))
         results['drainage_area'].append(float(jnp.sum(state.grid.cell_area_at_node) * 1e-6))
+        results['mean_fringe'].append(float(jnp.mean(state.fringe_thickness)))
+        results['med_fringe'].append(float(jnp.median(state.fringe_thickness)))
 
         for key, val in results.items():
             print(key, val[-1])
