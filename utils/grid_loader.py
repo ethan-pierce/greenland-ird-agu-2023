@@ -320,8 +320,6 @@ def main():
     for i in os.listdir('/home/egp/repos/greenland-ird/data/basin-outlines/SW/'):
         paths.append('SW/' + i)
 
-    paths = ['SW/kangiata-nunaata-sermia.geojson']
-
     for path in paths:
         glacier = path.split('/')[-1].replace('.geojson', '')
         print('Constructing mesh for ', glacier)
@@ -398,7 +396,7 @@ def main():
             crs = "epsg:3413",
             neighbors = 9,
             no_data = -9999.0,
-            sigma = 5
+            sigma = 7
         )
 
         loader.grid.add_field(

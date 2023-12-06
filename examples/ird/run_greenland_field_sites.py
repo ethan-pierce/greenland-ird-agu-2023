@@ -312,7 +312,7 @@ for Nc in [0.95, 0.9, 0.8, 0.6]:
 
         print('Finished simulation for ' + glacier.replace('-', ' ').title())
 
-        fig = plot_triangle_mesh(grids[glacier], state.fringe_thickness, subplots_args = {'figsize': figsize}, show = False, cmap = cmc.batlow)
+        fig = plot_triangle_mesh(grids[glacier], state.fringe_thickness, subplots_args = {'figsize': figsize}, show = False, cmap = cmc.batlow, set_clim = {'vmax': jnp.percentile(state.fringe_thickness, 99.5)})
         plt.title(title + ' fringe thickness (m)')
         plt.tick_params(axis = 'x', rotation = 25)
         plt.tick_params(axis = 'y', rotation = 25)
