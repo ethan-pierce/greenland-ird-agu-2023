@@ -22,6 +22,7 @@ landlab = { git = "git@github.com:ethan-pierce/landlab.git", branch = "ethan-pie
 cmcrameri = "^1.7"
 seaborn = "^0.13.0"
 symfit = "^0.5.6"
+jaxopt = "^0.8.3"
 
 [build-system]
 requires = ["poetry-core"]
