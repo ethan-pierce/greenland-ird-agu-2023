@@ -28,7 +28,7 @@ def test_tvd_algorithm():
 
     colors = plt.cm.jet(np.linspace(0, 1, 50))
     for i in range(50):
-        field = tvd.update(field, dt = 0.25)
+        field = tvd.update(field, dt = 0.025)
         field[rmg.boundary_nodes] = 0.0
 
         if i % 5 == 0:

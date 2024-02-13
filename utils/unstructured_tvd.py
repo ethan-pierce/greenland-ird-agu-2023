@@ -31,6 +31,10 @@ class TVDAdvector:
         """Van Leer limiter function."""
         return (r + jnp.abs(r)) / (1 + r)
 
+    def _superbee(self, r):
+        """Superbee limiter function."""
+        return jnp.max(jnp.asarray([0, jnp.minimum(2 * r, 1), jnp.minimum(r, 2)]))
+
     def _calc_stable_dt(self, cfl: float = 0.2):
         """Calculate the stable timestep for advection."""
         return cfl * jnp.min(self.grid.length_of_link) / (2 * jnp.max(jnp.abs(self.velocity)))
@@ -64,7 +68,7 @@ class TVDAdvector:
                 (field[d] - field[c])
             )
         
-            flux_limiter = self._van_leer(slope_factor)
+            flux_limiter = self._superbee(slope_factor)
 
             limited_field[link] = (
                 field[c] 
