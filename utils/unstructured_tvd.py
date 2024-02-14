@@ -5,7 +5,7 @@ import jax
 import jax.numpy as jnp
 import equinox as eqx
 from scipy.spatial import KDTree
-from landlab import TriangleMeshGrid
+from landlab import TriangleModelGrid
 from utils import StaticGrid
 
 class TVDAdvector(eqx.Module):
@@ -19,20 +19,27 @@ class TVDAdvector(eqx.Module):
     upwind_real_idx: jax.Array = eqx.field(init = False, converter = jnp.asarray)
     upwind_real_coords: jax.Array = eqx.field(init = False, converter = jnp.asarray)
     upwind_shift_vector: jax.Array = eqx.field(init = False, converter = jnp.asarray)
+    upwind_values: jax.Array = eqx.field(init = False, converter = jnp.asarray)
 
     def __post_init__(self):
         """Initialize the TVDAdvector."""
         self.upwind_ghost_at_link = self._identify_upwind_ghosts()
         self.upwind_real_idx, self.upwind_real_coords = self._get_nearest_upwind_real()
         self.upwind_shift_vector = self._calc_upwind_shift_vector()
+        self.upwind_values = self._interp_upwind_values()
 
-    def update(self, field, dt: float):
+    def update(self, dt: float):
         """Advect the tracer over dt seconds and return the resulting field."""
         if dt > self._calc_stable_dt():
             raise ValueError(f"Maximum stable timestep is {self._calc_stable_dt()} seconds.")
 
-        div = self.grid.calc_flux_div_at_node(self.calc_flux(field))
-        return field - div * dt
+        div = self.grid.calc_flux_div_at_node(self.calc_flux())
+
+        return eqx.tree_at(
+            lambda tree: tree.tracer,
+            self,
+            self.tracer - div * dt
+        )
 
     def _identify_upwind_ghosts(self):
         """Establish the upwind ghost nodes for each link."""
@@ -75,57 +82,50 @@ class TVDAdvector(eqx.Module):
             self.upwind_real_coords - self.upwind_ghost_at_link
         )
 
+    def _interp_gradient(self):
+        """Calculate the magnitude and (x, y) components of the gradient of a field at nodes."""
+        return self.grid.calc_gradient_vector_at_node(self.tracer)
+
+    def _interp_upwind_values(self):
+        """Interpolate the values of a field at the upwind ghost nodes."""
+        mag, comps = self._interp_gradient()
+
+        return (
+            self.tracer[self.upwind_real_idx]
+            + jnp.sum(self.upwind_shift_vector * comps[self.upwind_real_idx], axis = 1)
+        )
+
     def _van_leer(self, r):
         """Van Leer limiter function."""
-        return (r + jnp.abs(r)) / (1 + r)
-
-    def _superbee(self, r):
-        """Superbee limiter function."""
-        return jnp.max(jnp.asarray([0, jnp.minimum(2 * r, 1), jnp.minimum(r, 2)]))
+        return (r + jnp.abs(r)) / (1 + jnp.abs(r))
 
     def _calc_stable_dt(self, cfl: float = 0.2):
         """Calculate the stable timestep for advection."""
         return cfl * jnp.min(self.grid.length_of_link) / (2 * jnp.max(jnp.abs(self.velocity)))
 
-    def calc_flux_limited(self, field):
+    def _calc_face_flux(self):
         """Calculate the flux-limited field at links."""
-        gradient = self._interp_gradient(field)
+        center = jnp.where(
+            self.velocity >= 0,
+            self.tracer[self.grid.node_at_link_tail],
+            self.tracer[self.grid.node_at_link_head]
+        )
+        downwind = jnp.where(
+            self.velocity >= 0,
+            self.tracer[self.grid.node_at_link_head],
+            self.tracer[self.grid.node_at_link_tail]
+        )
+        upwind = self.upwind_values
 
-        limited_field = np.zeros(self.grid.number_of_links)
-        for link in jnp.arange(self.grid.number_of_links):
-            if self.velocity[link] >= 0:
-                c = self.grid.node_at_link_tail[link]
-                d = self.grid.node_at_link_head[link]
-            else:
-                c = self.grid.node_at_link_head[link]
-                d = self.grid.node_at_link_tail[link]
+        r_factor = jnp.where(
+            downwind != center,
+            (center - upwind) / (downwind - center),
+            0.0
+        )
 
-            if field[d] == field[c]:
-                limited_field[link] = field[c]
-                continue
+        return center + 0.5 * self._van_leer(r_factor) * (downwind - center)
 
-            grad_c = gradient[c]
-
-            vec = jnp.asarray(
-                [self.grid.node_x[d] - self.grid.node_x[c], 
-                self.grid.node_y[d] - self.grid.node_y[c]]
-            )
-
-            slope_factor = (
-                jnp.dot(2 * grad_c, vec) / 
-                (field[d] - field[c])
-            )
+    def calc_flux(self):
+        """Calculate the flux at links."""
+        return self.velocity * self._calc_face_flux()
         
-            flux_limiter = self._superbee(slope_factor)
-
-            limited_field[link] = (
-                field[c] 
-                + (1 / 2) * flux_limiter 
-                * (field[d] - field[c])
-            )
-
-        return jnp.asarray(limited_field)
-        
-    def calc_flux(self, field):
-        """Calculate the flux of a field at links."""
-        return self.velocity * self.calc_flux_limited(field)

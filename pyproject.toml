@@ -18,7 +18,7 @@ jaxlib = "^0.4.20"
 equinox = "^0.11.2"
 pytest = "^7.4.3"
 black = "^23.11.0"
-landlab = { git = "git@github.com:ethan-pierce/landlab.git", branch = "ethan-pierce/fix_links_at_patch_bug"}
+landlab = { git = "git@github.com:ethan-pierce/landlab.git", rev = "93f3f42e4f059eb9b7a372d083121dc8da95f389"}
 cmcrameri = "^1.7"
 seaborn = "^0.13.0"
 symfit = "^0.5.6"

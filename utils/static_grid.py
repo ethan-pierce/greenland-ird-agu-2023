@@ -165,9 +165,9 @@ class StaticGrid(eqx.Module):
     def calc_flux_div_at_node(self, array, dirichlet_boundary = 0.0):
         """At each node, calculate the divergence of an array of fluxes defined on links."""
         return jnp.where(
-            self.status_at_node == 0,
+            self.cell_area_at_node == 0,
+            dirichlet_boundary,
             jnp.divide(self.sum_at_nodes(array), self.cell_area_at_node),
-            dirichlet_boundary
         )
 
 def freeze_grid(grid) -> StaticGrid:

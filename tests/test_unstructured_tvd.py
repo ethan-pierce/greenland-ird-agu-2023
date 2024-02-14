@@ -3,19 +3,20 @@
 import numpy as np
 from numpy.testing import assert_array_almost_equal
 import pytest
-from landlab import RasterModelGrid, TriangleMeshGrid
+from landlab import RasterModelGrid, TriangleModelGrid
 
 from utils import StaticGrid, TVDAdvector, freeze_grid
-from utils.plotting import plot_triangle_mesh
+from utils.plotting import plot_triangle_mesh, plot_links
 
 @pytest.fixture
 def grid():
-    g = TriangleMeshGrid(
+    g = TriangleModelGrid(
         (
-            [-10, 10, 10, -10],
+            [-11, 10, 10, -10],
             [10, 10, -10, -10]
         ),
-        triangle_opts = 'pqDevjza0.25'
+        triangle_opts = 'pqDevjza0.25q27',
+        sort = True
     )
 
     g.add_field(
@@ -54,7 +55,7 @@ def test_tvd_init(tvd, grid, static_grid):
 def test_upwind_ghost_at_link(tvd):
     """Test that the upwind points are correctly identified at each link."""
     assert tvd.upwind_ghost_at_link.shape == (tvd.grid.number_of_links, 2)
-    assert tvd.upwind_ghost_at_link[0] == pytest.approx([7.166, 1.920], rel = 1e-3)
+    assert tvd.upwind_ghost_at_link[0] == pytest.approx([10.499, -11.025], rel = 1e-3)
 
 def test_upwind_real_at_link(tvd):
     """Test that the upwind cells are correctly identified at each link."""
@@ -64,10 +65,21 @@ def test_upwind_real_at_link(tvd):
 def test_upwind_shift_vector(tvd):
     """Test that the shift vector is correctly calculated at each link."""
     assert tvd.upwind_shift_vector.shape == (tvd.grid.number_of_links, 2)
-    assert tvd.upwind_shift_vector[0] == pytest.approx([0.305, -0.02453], rel = 1e-3)
+    assert tvd.upwind_shift_vector[0] == pytest.approx([-0.499, 0.02497], rel = 1e-3)
 
-def test_calc_gradient_vector(tvd, grid):
-    """Test that the gradient vector is correctly calculated at each node."""
-    mag, comps = tvd.grid.calc_gradient_vector_at_node(tvd.tracer)
-    
-    plot_triangle_mesh(grid, comps[:, 1])
+def test_interp_upwind_values(tvd):
+    """Test that the upwind values are correctly interpolated."""
+    assert tvd._interp_upwind_values().shape == (tvd.grid.number_of_links,)
+
+def test_calc_face_flux(tvd):
+    """Test that the flux-limited field is correctly calculated."""
+    assert tvd._calc_face_flux().shape == (tvd.grid.number_of_links,)
+
+def test_update(tvd, grid):
+    """Test the TVD update routine."""
+    plot_triangle_mesh(grid, tvd.tracer)
+
+    for i in range(10):
+        tvd = tvd.update(dt = 0.03)
+
+    plot_triangle_mesh(grid, tvd.tracer)
