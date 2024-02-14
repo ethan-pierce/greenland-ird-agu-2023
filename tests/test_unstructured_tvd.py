@@ -58,5 +58,10 @@ def test_upwind_ghost_at_link(tvd):
 
 def test_upwind_real_at_link(tvd):
     """Test that the upwind cells are correctly identified at each link."""
-    assert tvd.upwind_real_at_link.shape == (tvd.grid.number_of_links,)
+    assert tvd.upwind_real_idx.shape == (tvd.grid.number_of_links,)
+    assert tvd.upwind_real_coords.shape == (tvd.grid.number_of_links, 2)
 
+def test_upwind_shift_vector(tvd):
+    """Test that the shift vector is correctly calculated at each link."""
+    assert tvd.upwind_shift_vector.shape == (tvd.grid.number_of_links, 2)
+    assert tvd.upwind_shift_vector[0] == pytest.approx([0.305, -0.02453], rel = 1e-3)

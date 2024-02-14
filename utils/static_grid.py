@@ -83,6 +83,10 @@ class StaticGrid(eqx.Module):
             self.calc_grad_at_link(array)
         )
 
+    def calc_gradient_vector_at_node(self, array):
+        """At each node, calculate the component-wise gradient of an array defined on nodes."""
+        pass
+
     def calc_grad_at_link(self, array):
         """At each link, calculate the gradient of an array defined on nodes."""
         return jnp.divide(

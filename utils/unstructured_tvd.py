@@ -4,6 +4,7 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 import equinox as eqx
+from scipy.spatial import KDTree
 from landlab import TriangleMeshGrid
 from utils import StaticGrid
 
@@ -15,12 +16,15 @@ class TVDAdvector(eqx.Module):
     tracer: jax.Array = eqx.field(converter = jnp.asarray)
 
     upwind_ghost_at_link: jax.Array = eqx.field(init = False, converter = jnp.asarray)
-    upwind_real_at_link: jax.Array = eqx.field(init = False, converter = jnp.asarray)
+    upwind_real_idx: jax.Array = eqx.field(init = False, converter = jnp.asarray)
+    upwind_real_coords: jax.Array = eqx.field(init = False, converter = jnp.asarray)
+    upwind_shift_vector: jax.Array = eqx.field(init = False, converter = jnp.asarray)
 
     def __post_init__(self):
         """Initialize the TVDAdvector."""
         self.upwind_ghost_at_link = self._identify_upwind_ghosts()
-        self.upwind_real_at_link = self._get_nearest_upwind_real()
+        self.upwind_real_idx, self.upwind_real_coords = self._get_nearest_upwind_real()
+        self.upwind_shift_vector = self._calc_upwind_shift_vector()
 
     def update(self, field, dt: float):
         """Advect the tracer over dt seconds and return the resulting field."""
@@ -55,18 +59,21 @@ class TVDAdvector(eqx.Module):
         ).T
 
     def _get_nearest_upwind_real(self):
-        """Identify the upwind cells for each link."""
-        pass
+        """Identify the nearest upwind real nodes for each link."""
+        points = jnp.asarray(
+            [self.grid.node_x, self.grid.node_y]
+        ).T
 
-    def _interp_gradient(self, field):
-        """Interpolate the component-wise gradient of a scalar field at nodes."""
-        mag, comps = self.grid.calc_slope_at_node(
-            elevs = field,
-            ignore_closed_nodes = False,
-            return_components = True
-        )
+        tree = KDTree(points)
+        _, indices = tree.query(self.upwind_ghost_at_link)
 
-        return jnp.asarray(comps).T
+        return indices, points[indices]
+
+    def _calc_upwind_shift_vector(self):
+        """Calculate the shift vector between the upwind ghosts and reals."""
+        return (
+            self.upwind_real_coords - self.upwind_ghost_at_link
+        )    
 
     def _van_leer(self, r):
         """Van Leer limiter function."""
