@@ -51,7 +51,12 @@ def test_tvd_init(tvd, grid, static_grid):
     assert tvd.velocity.shape == (grid.number_of_links,)
     assert tvd.tracer.shape == (grid.number_of_nodes,)
 
-def test_upwind_point_at_link(tvd):
+def test_upwind_ghost_at_link(tvd):
     """Test that the upwind points are correctly identified at each link."""
-    pass
+    assert tvd.upwind_ghost_at_link.shape == (tvd.grid.number_of_links, 2)
+    assert tvd.upwind_ghost_at_link[0] == pytest.approx([7.166, 1.920], rel = 1e-3)
+
+def test_upwind_real_at_link(tvd):
+    """Test that the upwind cells are correctly identified at each link."""
+    assert tvd.upwind_real_at_link.shape == (tvd.grid.number_of_links,)
 

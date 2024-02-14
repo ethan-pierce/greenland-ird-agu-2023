@@ -14,9 +14,13 @@ class TVDAdvector(eqx.Module):
     velocity: jax.Array = eqx.field(converter = jnp.asarray)
     tracer: jax.Array = eqx.field(converter = jnp.asarray)
 
-    def initialize(self):
+    upwind_ghost_at_link: jax.Array = eqx.field(init = False, converter = jnp.asarray)
+    upwind_real_at_link: jax.Array = eqx.field(init = False, converter = jnp.asarray)
+
+    def __post_init__(self):
         """Initialize the TVDAdvector."""
-        pass
+        self.upwind_ghost_at_link = self._identify_upwind_ghosts()
+        self.upwind_real_at_link = self._get_nearest_upwind_real()
 
     def update(self, field, dt: float):
         """Advect the tracer over dt seconds and return the resulting field."""
@@ -26,8 +30,32 @@ class TVDAdvector(eqx.Module):
         div = self.grid.calc_flux_div_at_node(self.calc_flux(field))
         return field - div * dt
 
-    def _identify_upwind_points(self):
-        """Identify the upwind points for each link."""
+    def _identify_upwind_ghosts(self):
+        """Establish the upwind ghost nodes for each link."""
+        head_x = self.grid.node_x[self.grid.node_at_link_head]
+        head_y = self.grid.node_y[self.grid.node_at_link_head]
+        tail_x = self.grid.node_x[self.grid.node_at_link_tail]
+        tail_y = self.grid.node_y[self.grid.node_at_link_tail]
+
+        ghost_if_head_upwind = jnp.asarray([
+            tail_x - (head_x - tail_x),
+            tail_y - (head_y - tail_y)
+        ])
+
+        ghost_if_tail_upwind = jnp.asarray([
+            head_x - (tail_x - head_x),
+            head_y - (tail_y - head_y)
+        ])
+
+        # Convention: consider zero velocity to be positive
+        return jnp.where(
+            self.velocity >= 0,
+            ghost_if_tail_upwind,
+            ghost_if_head_upwind
+        ).T
+
+    def _get_nearest_upwind_real(self):
+        """Identify the upwind cells for each link."""
         pass
 
     def _interp_gradient(self, field):
