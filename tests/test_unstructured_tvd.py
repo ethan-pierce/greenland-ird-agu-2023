@@ -5,33 +5,53 @@ from numpy.testing import assert_array_almost_equal
 import pytest
 from landlab import RasterModelGrid, TriangleMeshGrid
 
-from utils import StaticGrid, TVDAdvector
+from utils import StaticGrid, TVDAdvector, freeze_grid
+from utils.plotting import plot_triangle_mesh
 
-from landlab import imshow_grid
-import matplotlib.pyplot as plt
+@pytest.fixture
+def grid():
+    g = TriangleMeshGrid(
+        (
+            [-10, 10, 10, -10],
+            [10, 10, -10, -10]
+        ),
+        triangle_opts = 'pqDevjza0.25'
+    )
 
-def test_tvd_algorithm():
-    rmg = RasterModelGrid((3, 20))
+    g.add_field(
+        "velocity",
+        np.ones(g.number_of_links),
+        at = 'link'
+    )
+    g.add_field(
+        "tracer",
+        np.zeros(g.number_of_nodes),
+        at = 'node'
+    )
+    g.at_node['tracer'][
+        (g.node_x < -5)
+        & (g.node_x > -10)
+        & (g.node_y < 5)
+        & (g.node_y > -5)
+    ] = 1.0
 
-    # Looks weird but necessary to test gradient ratio
-    field = rmg.add_zeros('field', at = 'node')
-    field[24:26] = 2.0
-    field[rmg.boundary_nodes] = 0.0
+    return g
 
-    imshow_grid(rmg, field)
-    plt.show()
+@pytest.fixture
+def static_grid(grid):
+    return freeze_grid(grid)
 
-    velocity = rmg.add_zeros('velocity', at = 'link')
-    velocity[rmg.horizontal_links] = 0.2
+@pytest.fixture
+def tvd(grid, static_grid):
+    return TVDAdvector(static_grid, grid.at_link['velocity'], grid.at_node['tracer'])
 
-    tvd = TVDAdvector(rmg, 'velocity')
+def test_tvd_init(tvd, grid, static_grid):
+    """Test that the TVDAdvector is initialized correctly."""
+    assert tvd.grid == static_grid
+    assert tvd.velocity.shape == (grid.number_of_links,)
+    assert tvd.tracer.shape == (grid.number_of_nodes,)
 
-    colors = plt.cm.jet(np.linspace(0, 1, 50))
-    for i in range(50):
-        field = tvd.update(field, dt = 0.025)
-        field[rmg.boundary_nodes] = 0.0
+def test_upwind_point_at_link(tvd):
+    """Test that the upwind points are correctly identified at each link."""
+    pass
 
-        if i % 5 == 0:
-            plt.plot(field[rmg.node_y == 1], color = colors[i])
-
-    plt.show()

@@ -3,19 +3,32 @@
 import numpy as np
 import jax
 import jax.numpy as jnp
+import equinox as eqx
 from landlab import TriangleMeshGrid
+from utils import StaticGrid
 
-class TVDAdvector:
-    """JAX-backed implementation of first-order TVD advection in Landlab."""
+class TVDAdvector(eqx.Module):
+    """JAX- and Equinox-backed implementation of first-order TVD advection in Landlab."""
 
-    def __init__(self, grid, velocity: str):
-        """Initialize the TVDAdvector with a Landlab grid."""
-        self.grid = grid
+    grid: StaticGrid
+    velocity: jax.Array = eqx.field(converter = jnp.asarray)
+    tracer: jax.Array = eqx.field(converter = jnp.asarray)
 
-        if velocity not in self.grid.at_link:
-            raise ValueError(f"Link field '{velocity}' not found in grid.")
+    def initialize(self):
+        """Initialize the TVDAdvector."""
+        pass
 
-        self.velocity = jnp.asarray(self.grid.at_link[velocity][:])
+    def update(self, field, dt: float):
+        """Advect the tracer over dt seconds and return the resulting field."""
+        if dt > self._calc_stable_dt():
+            raise ValueError(f"Maximum stable timestep is {self._calc_stable_dt()} seconds.")
+
+        div = self.grid.calc_flux_div_at_node(self.calc_flux(field))
+        return field - div * dt
+
+    def _identify_upwind_points(self):
+        """Identify the upwind points for each link."""
+        pass
 
     def _interp_gradient(self, field):
         """Interpolate the component-wise gradient of a scalar field at nodes."""
@@ -81,11 +94,3 @@ class TVDAdvector:
     def calc_flux(self, field):
         """Calculate the flux of a field at links."""
         return self.velocity * self.calc_flux_limited(field)
-
-    def update(self, field, dt: float):
-        """Return a new field after advecting for dt seconds."""
-        if dt > self._calc_stable_dt():
-            raise ValueError("Timestep too large for stability.")
-
-        div = self.grid.calc_flux_div_at_node(self.calc_flux(field))
-        return field - div * dt
