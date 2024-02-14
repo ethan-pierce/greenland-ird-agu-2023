@@ -38,10 +38,11 @@ class StaticGrid(eqx.Module):
     node_at_link_tail: jax.Array = eqx.field(converter = jnp.asarray)
     links_at_node: jax.Array = eqx.field(converter = jnp.asarray)
     link_dirs_at_node: jax.Array = eqx.field(converter = jnp.asarray)
-    # parallel_links_at_link: jax.Array = eqx.field(converter = jnp.asarray)
     face_at_link: jax.Array = eqx.field(converter = jnp.asarray)
     cell_at_node: jax.Array = eqx.field(converter = jnp.asarray)
     corners_at_face: jax.Array = eqx.field(converter = jnp.asarray)
+    nodes_at_patch: jax.Array = eqx.field(converter = jnp.asarray)
+    patches_at_node: jax.Array = eqx.field(converter = jnp.asarray)
 
     def map_mean_of_links_to_node(self, array):
         """Map an array of values from links to nodes."""
@@ -83,10 +84,77 @@ class StaticGrid(eqx.Module):
             self.calc_grad_at_link(array)
         )
 
+    def calc_unit_normal_at_patch(self, array):
+        """Calculate the three-dimensional unit normal vector to each patch."""
+        
+        # Each patch is defined by three nodes, PQR
+        vector_PQ = jnp.column_stack(
+            [
+                self.node_x[self.nodes_at_patch[:, 1]] - self.node_x[self.nodes_at_patch[:, 0]],
+                self.node_y[self.nodes_at_patch[:, 1]] - self.node_y[self.nodes_at_patch[:, 0]],
+                array[self.nodes_at_patch[:, 1]] - array[self.nodes_at_patch[:, 0]]
+            ]
+        )
+        vector_PR = jnp.column_stack(
+            [
+                self.node_x[self.nodes_at_patch[:, 2]] - self.node_x[self.nodes_at_patch[:, 0]],
+                self.node_y[self.nodes_at_patch[:, 2]] - self.node_y[self.nodes_at_patch[:, 0]],
+                array[self.nodes_at_patch[:, 2]] - array[self.nodes_at_patch[:, 0]]
+            ]
+        )
+
+        normal_hat = jnp.cross(vector_PQ, vector_PR)
+        normal_mag = jnp.sqrt(jnp.square(normal_hat).sum(axis = 1))
+
+        return normal_hat / normal_mag.reshape(self.number_of_patches, 1)
+
+    def calc_grad_at_patch(self, array):
+        """Calculate the gradient of an array at patches."""
+        unit_normal = self.calc_unit_normal_at_patch(array)
+        theta = jnp.arctan2(-unit_normal[:, 1], -unit_normal[:, 0])
+        slope_at_patch = jnp.arccos(unit_normal[:, 2])
+
+        components = (
+            jnp.cos(theta) * slope_at_patch,
+            jnp.sin(theta) * slope_at_patch
+        )
+
+        return slope_at_patch, components
+
     def calc_gradient_vector_at_node(self, array):
         """At each node, calculate the component-wise gradient of an array defined on nodes."""
-        pass
+        slope_at_patch, components = self.calc_grad_at_patch(array)
+        x_slope_unmasked, y_slope_unmasked = components
 
+        magnitude_at_node = jnp.nanmean(
+            jnp.where(
+                self.patches_at_node != -1,
+                slope_at_patch[self.patches_at_node],
+                jnp.nan
+            ),
+            axis = 1
+        )
+
+        x_component = jnp.nanmean(
+            jnp.where(
+                self.patches_at_node != -1,
+                x_slope_unmasked[self.patches_at_node],
+                jnp.nan
+            ),
+            axis = 1
+        )
+
+        y_component = jnp.nanmean(
+            jnp.where(
+                self.patches_at_node != -1,
+                y_slope_unmasked[self.patches_at_node],
+                jnp.nan
+            ),
+            axis = 1
+        )
+
+        return magnitude_at_node, jnp.asarray([x_component, y_component]).T
+        
     def calc_grad_at_link(self, array):
         """At each link, calculate the gradient of an array defined on nodes."""
         return jnp.divide(

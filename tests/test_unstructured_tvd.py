@@ -65,3 +65,9 @@ def test_upwind_shift_vector(tvd):
     """Test that the shift vector is correctly calculated at each link."""
     assert tvd.upwind_shift_vector.shape == (tvd.grid.number_of_links, 2)
     assert tvd.upwind_shift_vector[0] == pytest.approx([0.305, -0.02453], rel = 1e-3)
+
+def test_calc_gradient_vector(tvd, grid):
+    """Test that the gradient vector is correctly calculated at each node."""
+    mag, comps = tvd.grid.calc_gradient_vector_at_node(tvd.tracer)
+    
+    plot_triangle_mesh(grid, comps[:, 1])

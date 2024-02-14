@@ -73,7 +73,7 @@ class TVDAdvector(eqx.Module):
         """Calculate the shift vector between the upwind ghosts and reals."""
         return (
             self.upwind_real_coords - self.upwind_ghost_at_link
-        )    
+        )
 
     def _van_leer(self, r):
         """Van Leer limiter function."""
