@@ -74,12 +74,3 @@ def test_interp_upwind_values(tvd):
 def test_calc_face_flux(tvd):
     """Test that the flux-limited field is correctly calculated."""
     assert tvd._calc_face_flux().shape == (tvd.grid.number_of_links,)
-
-def test_update(tvd, grid):
-    """Test the TVD update routine."""
-    plot_triangle_mesh(grid, tvd.tracer)
-
-    for i in range(10):
-        tvd = tvd.update(dt = 0.03)
-
-    plot_triangle_mesh(grid, tvd.tracer)

@@ -28,17 +28,15 @@ class TVDAdvector(eqx.Module):
         self.upwind_shift_vector = self._calc_upwind_shift_vector()
         self.upwind_values = self._interp_upwind_values()
 
+    @jax.jit
     def update(self, dt: float):
         """Advect the tracer over dt seconds and return the resulting field."""
-        if dt > self._calc_stable_dt():
-            raise ValueError(f"Maximum stable timestep is {self._calc_stable_dt()} seconds.")
-
         div = self.grid.calc_flux_div_at_node(self.calc_flux())
 
         return eqx.tree_at(
             lambda tree: tree.tracer,
             self,
-            self.tracer - div * dt
+            self.tracer + dt * div
         )
 
     def _identify_upwind_ghosts(self):
@@ -99,9 +97,12 @@ class TVDAdvector(eqx.Module):
         """Van Leer limiter function."""
         return (r + jnp.abs(r)) / (1 + jnp.abs(r))
 
-    def _calc_stable_dt(self, cfl: float = 0.2):
-        """Calculate the stable timestep for advection."""
-        return cfl * jnp.min(self.grid.length_of_link) / (2 * jnp.max(jnp.abs(self.velocity)))
+    def _superbee(self, r):
+        """Superbee limiter function."""
+        return jnp.maximum(
+            jnp.zeros_like(r), 
+            jnp.maximum(jnp.minimum(2 * r, 1), jnp.minimum(r, 2))
+        )
 
     def _calc_face_flux(self):
         """Calculate the flux-limited field at links."""
@@ -128,4 +129,9 @@ class TVDAdvector(eqx.Module):
     def calc_flux(self):
         """Calculate the flux at links."""
         return self.velocity * self._calc_face_flux()
+
+    def calc_stable_dt(self, cfl: float = 0.2):
+        """Calculate the stable timestep for advection."""
+        return cfl * jnp.min(self.grid.length_of_link) / (2 * jnp.max(jnp.abs(self.velocity)))
+
         
