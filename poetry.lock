@@ -733,8 +733,25 @@ testing = ["coveralls", "hypothesis", "pytest", "pytest-cov", "pytest-datadir", 
 [package.source]
 type = "git"
 url = "git@github.com:ethan-pierce/landlab.git"
-reference = "ethan-pierce/fix_links_at_patch_bug"
-resolved_reference = "0ce3f81a47e86954e03330eea62f35f59222a06c"
+reference = "93f3f42e4f059eb9b7a372d083121dc8da95f389"
+resolved_reference = "93f3f42e4f059eb9b7a372d083121dc8da95f389"
+
+[[package]]
+name = "lineax"
+version = "0.0.4"
+description = "Linear solvers in JAX and Equinox."
+optional = false
+python-versions = "~=3.9"
+files = [
+    {file = "lineax-0.0.4-py3-none-any.whl", hash = "sha256:284ae4b6fff3f291cefa675d5cc059b9338d5ee740df0585b92d534b59213248"},
+    {file = "lineax-0.0.4.tar.gz", hash = "sha256:e68f1eba2f352122fdce9adc0556684f31eb8364b1a00acee484dd6e44a34e5e"},
+]
+
+[package.dependencies]
+equinox = ">=0.11.0"
+jax = ">=0.4.13"
+jaxtyping = ">=0.2.20"
+typing-extensions = ">=4.5.0"
 
 [[package]]
 name = "markdown-it-py"
@@ -1880,4 +1897,4 @@ viz = ["matplotlib", "nc-time-axis", "seaborn"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.13"
-content-hash = "38c3890209809d7bc2cf0f95fac156df7a07aacba48f69b7a057473ff26d64d1"
+content-hash = "30c3a3979d3dee2b9826c47fa4277167c804051db3418dd2f1fa380138b37adb"

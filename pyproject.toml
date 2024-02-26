@@ -23,6 +23,7 @@ cmcrameri = "^1.7"
 seaborn = "^0.13.0"
 symfit = "^0.5.6"
 jaxopt = "^0.8.3"
+lineax = "^0.0.4"
 
 [build-system]
 requires = ["poetry-core"]
