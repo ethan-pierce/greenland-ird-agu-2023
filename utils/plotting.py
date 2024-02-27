@@ -16,7 +16,8 @@ def plot_triangle_mesh(
     set_clim = False,
     norm = None,
     cbar_ticks = None,
-    show = True
+    show = True,
+    title = None
 ):
     """Plot a field defined on an unstructured mesh."""
     if isinstance(field, str):
@@ -99,6 +100,9 @@ def plot_triangle_mesh(
     else:
         plt.colorbar(im)
 
+    if title is not None:
+        plt.title(title)
+
     if show:
         plt.show()
     
@@ -109,7 +113,8 @@ def plot_links(
     field,
     cmap = plt.cm.jet,
     subplots_args = None,
-    show = True
+    show = True,
+    title = None
 ):
     """Plot a field defined on grid links."""
     lines = []
@@ -135,6 +140,9 @@ def plot_links(
     ax.autoscale()
 
     plt.colorbar(im)
+
+    if title is not None:
+        plt.title(title)
 
     if show:
         plt.show()

@@ -48,5 +48,10 @@ def test_route_discharge(hydro, grid):
     solution = hydro._route_discharge()
     assert solution.shape == (grid.number_of_links,)
 
-    plot_triangle_mesh(grid, grid.at_node['melt_rate'])
-    plot_links(grid, np.abs(solution))
+    plot_triangle_mesh(grid, grid.at_node['melt_rate'], title = 'Melt input (m / s)')
+
+    frozen = freeze_grid(grid)
+    discharge = np.abs(solution) * frozen.length_of_face[frozen.face_at_link]
+    plot_links(grid, discharge, title = 'Discharge (m^3 / s)')
+
+    
