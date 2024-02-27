@@ -19,12 +19,13 @@ def grid():
             [1000, 1000, -1000, -1000]
         ),
         triangle_opts = 'pqDevjza1000q20',
-        sort = True
+        sort = False
     )
 
-    g.add_ones('melt_rate', at = 'node')
-    g.at_node['melt_rate'] *= (np.max(g.node_x) - g.node_x) / 31556926 * g.cell_area_at_node
-    
+    g.add_zeros('melt_rate', at = 'node')
+    g.at_node['melt_rate'] = (np.max(g.node_x) - g.node_x) * 1e-4 # m / s
+    g.at_node['melt_rate'][g.cell_area_at_node == 0] = 0.0
+    # g.at_node['melt_rate'][g.node_x == -1000] = 0.2
     return g
 
 @pytest.fixture
@@ -39,11 +40,13 @@ def test_adjacency_matrix(hydro, grid):
     assert hydro.adjacency_matrix.shape == (grid.number_of_nodes, grid.number_of_nodes)
 
     assert_array_equal(
-        np.sum(hydro.adjacency_matrix, axis = 1),
+        np.count_nonzero(hydro.adjacency_matrix, axis = 1),
         np.count_nonzero(grid.adjacent_nodes_at_node + 1, axis = 1)
     )
 
 def test_route_discharge(hydro, grid):
     solution = hydro._route_discharge()
-    assert solution.shape == (grid.number_of_nodes,)
+    assert solution.shape == (grid.number_of_links,)
 
+    plot_triangle_mesh(grid, grid.at_node['melt_rate'])
+    plot_links(grid, np.abs(solution))

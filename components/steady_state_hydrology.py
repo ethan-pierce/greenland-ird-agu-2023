@@ -5,6 +5,7 @@ import jax
 import jax.numpy as jnp
 import equinox as eqx
 import lineax as lx
+import jaxopt
 
 from utils import StaticGrid
 
@@ -22,35 +23,55 @@ class SteadyStateHydrology(eqx.Module):
     grid: StaticGrid
     melt_rate: jax.Array = eqx.field(converter = jnp.asarray)
 
-    adjacency_matrix: jax.Array = eqx.field(converter = jnp.asarray, init = False)
-    operator: lx.MatrixLinearOperator = eqx.field(init = False)
+    # adjacency_matrix: jax.Array = eqx.field(converter = jnp.asarray, init = False)
+    # operator: lx.MatrixLinearOperator = eqx.field(init = False)
 
     def __post_init__(self):
         """Initialize the component."""
-        self._build_adjacency_matrix()
-        self.operator = lx.MatrixLinearOperator(self.adjacency_matrix)
+        pass
+        # self._build_adjacency_matrix()
+        # self.operator = lx.MatrixLinearOperator(self.adjacency_matrix)
         
     def _build_adjacency_matrix(self):
         """Build the adjacency matrix for the grid."""
         adjacency = np.zeros((self.grid.number_of_nodes, self.grid.number_of_nodes))
 
         for i in range(self.grid.number_of_nodes):
-            for j in self.grid.adjacent_nodes_at_node[i]:
-                if j != -1:
-                    adjacency[i, j] = 1
-                    adjacency[j, i] = 1
+            adj_nodes = self.grid.adjacent_nodes_at_node    [i]
+            valid_adj_nodes = adj_nodes[adj_nodes != -1]
 
+            links_i = self.grid.links_at_node[i]
+            links_j = self.grid.links_at_node[valid_adj_nodes]
+            common_links = np.intersect1d(links_i, links_j)
+            valid_links = common_links[common_links != -1]
+
+            lengths = self.grid.length_of_link[valid_links]
+
+            adjacency[i, valid_adj_nodes] = 1 / lengths
+            adjacency[valid_adj_nodes, i] = 1 / lengths
+                    
         self.adjacency_matrix = jnp.asarray(adjacency)
+
+    def _discharge_residual(self, discharge: jax.Array):
+        """Return the excess discharge at grid nodes."""
+        Q = jnp.where(self.grid.status_at_link == 4, 0.0, discharge)
+
+        melt_div = jnp.sum(
+            Q[self.grid.links_at_node],
+            axis = 1
+        )
+
+        return melt_div - self.melt_rate
 
     def _route_discharge(self):
         """Route meltwater input at nodes through grid links."""
-        solution = lx.linear_solve(
-            operator = self.operator, 
-            vector = self.melt_rate,
-            solver = lx.AutoLinearSolver(well_posed = True),
-            throw = True
+        solver = jaxopt.GaussNewton(
+            residual_fun = self._discharge_residual,
+            verbose = True,
+            tol = 1e-12
         )
-        return solution.value
+
+        return solver.run(jnp.zeros(self.grid.number_of_links)).params
 
     
 

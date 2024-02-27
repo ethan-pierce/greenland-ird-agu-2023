@@ -32,6 +32,7 @@ class StaticGrid(eqx.Module):
     core_nodes: jax.Array = eqx.field(converter = jnp.asarray)
     boundary_nodes: jax.Array = eqx.field(converter = jnp.asarray)
     status_at_node: jax.Array = eqx.field(converter = jnp.asarray)
+    status_at_link: jax.Array = eqx.field(converter = jnp.asarray)
 
     # Connectivity
     node_at_link_head: jax.Array = eqx.field(converter = jnp.asarray)
