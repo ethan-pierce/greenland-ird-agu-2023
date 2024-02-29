@@ -22,6 +22,9 @@ def grid():
         sort = False
     )
 
+    g.add_zeros('overburden', at = 'node')
+    g.at_node['overburden'] = (0.5 * g.node_x + np.max(g.node_x)) * 1e3 # Pa
+
     g.add_zeros('melt_rate', at = 'node')
     g.at_node['melt_rate'] = (np.max(g.node_x) - g.node_x) * 1e-4 # m / s
     g.at_node['melt_rate'][g.cell_area_at_node == 0] = 0.0
@@ -33,7 +36,8 @@ def hydro(grid):
     static = freeze_grid(grid)
     return SteadyStateHydrology(
         grid = static, 
-        melt_rate = grid.at_node['melt_rate']
+        melt_rate = grid.at_node['melt_rate'],
+        overburden = grid.at_node['overburden']
     )
 
 def test_adjacency_matrix(hydro, grid):
@@ -45,13 +49,14 @@ def test_adjacency_matrix(hydro, grid):
     )
 
 def test_route_discharge(hydro, grid):
+    plot_triangle_mesh(grid, grid.at_node['overburden'], title = 'Overburden pressure (Pa)')
+
+    frozen = freeze_grid(grid)
     solution = hydro._route_discharge()
     assert solution.shape == (grid.number_of_links,)
 
     plot_triangle_mesh(grid, grid.at_node['melt_rate'], title = 'Melt input (m / s)')
 
-    frozen = freeze_grid(grid)
-    discharge = np.abs(solution) * frozen.length_of_face[frozen.face_at_link]
-    plot_links(grid, discharge, title = 'Discharge (m^3 / s)')
+    plot_links(grid, solution, title = 'Discharge per unit width (m / s)')
 
     

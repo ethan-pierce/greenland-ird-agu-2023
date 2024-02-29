@@ -22,6 +22,7 @@ class SteadyStateHydrology(eqx.Module):
     
     grid: StaticGrid
     melt_rate: jax.Array = eqx.field(converter = jnp.asarray)
+    overburden: jax.Array = eqx.field(converter = jnp.asarray)
 
     # adjacency_matrix: jax.Array = eqx.field(converter = jnp.asarray, init = False)
     # operator: lx.MatrixLinearOperator = eqx.field(init = False)
@@ -54,23 +55,30 @@ class SteadyStateHydrology(eqx.Module):
 
     def _discharge_residual(self, discharge: jax.Array):
         """Return the excess discharge at grid nodes."""
-        Q = jnp.where(self.grid.status_at_link == 4, 0.0, discharge)
+        discharge = jnp.where(self.grid.status_at_link == 4, 0.0, discharge)
 
-        melt_div = jnp.sum(
-            Q[self.grid.links_at_node],
+        direction = jnp.where(
+            self.overburden[self.grid.node_at_link_head] 
+            > self.overburden[self.grid.node_at_link_tail],
+            1,
+            -1
+        )
+
+        net_flux = jnp.sum(
+            (direction * discharge)[self.grid.links_at_node],
             axis = 1
         )
 
-        return melt_div - self.melt_rate
+        return net_flux - self.melt_rate 
 
     def _route_discharge(self):
         """Route meltwater input at nodes through grid links."""
         solver = jaxopt.GaussNewton(
             residual_fun = self._discharge_residual,
             verbose = True,
-            tol = 1e-12
+            tol = 1e-10
         )
-
+    
         return solver.run(jnp.zeros(self.grid.number_of_links)).params
 
     
