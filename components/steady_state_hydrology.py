@@ -55,17 +55,23 @@ class SteadyStateHydrology(eqx.Module):
 
     def _discharge_residual(self, discharge: jax.Array):
         """Return the excess discharge at grid nodes."""
-        discharge = jnp.where(self.grid.status_at_link == 4, 0.0, discharge)
+        # discharge = jnp.where(self.grid.status_at_link == 4, 0.0, discharge)
 
-        direction = jnp.where(
-            self.overburden[self.grid.node_at_link_head] 
-            > self.overburden[self.grid.node_at_link_tail],
-            1,
-            -1
-        )
+        # direction = jnp.where(
+        #     self.overburden[self.grid.node_at_link_head] 
+        #     > self.overburden[self.grid.node_at_link_tail],
+        #     1,
+        #     -1
+        # )
+
+        # net_flux = jnp.sum(
+        #     (direction * discharge)[self.grid.links_at_node],
+        #     axis = 1
+        # )
 
         net_flux = jnp.sum(
-            (direction * discharge)[self.grid.links_at_node],
+            # self.grid.link_dirs_at_node *
+            discharge[self.grid.links_at_node],
             axis = 1
         )
 

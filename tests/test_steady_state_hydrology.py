@@ -49,14 +49,11 @@ def test_adjacency_matrix(hydro, grid):
     )
 
 def test_route_discharge(hydro, grid):
-    plot_triangle_mesh(grid, grid.at_node['overburden'], title = 'Overburden pressure (Pa)')
-
     frozen = freeze_grid(grid)
     solution = hydro._route_discharge()
     assert solution.shape == (grid.number_of_links,)
 
     plot_triangle_mesh(grid, grid.at_node['melt_rate'], title = 'Melt input (m / s)')
+    # plot_triangle_mesh(grid, grid.at_node['overburden'], title = 'Overburden pressure (Pa)')
 
     plot_links(grid, solution, title = 'Discharge per unit width (m / s)')
-
-    
