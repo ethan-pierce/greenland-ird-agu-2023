@@ -65,65 +65,16 @@ class ConduitHydrology(eqx.Module):
 
         return discharge
 
-    def calc_hydraulic_gradient(self, effective_pressure: jnp.array) -> jnp.array:
-        """Compute the hydraulic gradient."""
-        return (
-            self.grid.map_mean_of_links_to_node(
-                self.grid.calc_grad_at_link(effective_pressure)
-            ) 
-            + self.geometric_gradient
+    def calc_hydraulic_gradient(self, conduit_size: jnp.array) -> jnp.array:
+        """Calculate the hydraulic gradient through a conduit."""
+        gradient = (
+            (self.discharge * self.flow_coeff * conduit_size**self.flow_exp)**2
         )
 
-    def calc_pressure_residual(self, effective_pressure: jnp.array) -> jnp.array:
-        """Compute the residual of the pressure field."""
-
-        # Boundary condition: Pw = 0
-        effective_pressure = jnp.where(
-            self.grid.status_at_node != 0,
-            self.state.overburden_pressure,
-            effective_pressure
+        return jnp.where(
+            self.grid.status_at_node == 0,
+            gradient,
+            0.0
         )
 
-        gradient = self.calc_hydraulic_gradient(effective_pressure)
-
-        cavity_opening = (
-            jnp.abs(
-                self.grid.map_mean_of_links_to_node(
-                    self.state.sliding_velocity / self.state.sec_per_a
-                )
-            )
-            * self.step_height
-        )
-
-        conduit_size = (
-            (self.opening_coeff * self.discharge * gradient + cavity_opening)
-            /
-            (cavity_opening / self.scale_cutoff + self.closure_coeff * effective_pressure**self.n)
-        )
-
-        # Regularization to avoid division by close-to-zero
-        conduit_size = jnp.where(
-            conduit_size < 1e-6,
-            1e-6,
-            conduit_size
-        )
-
-        residual = (
-            self.discharge 
-            - self.opening_coeff * conduit_size**self.flow_exp 
-            * jnp.abs(gradient)**(-1/2) * gradient
-        )
-
-        return residual
-
-    def solve_for_pressure(self) -> jnp.array:
-        """Solve for the effective pressure."""
-        solver = jaxopt.GaussNewton(
-            residual_fun = self.calc_pressure_residual,
-            maxiter = 30,
-            tol = 1e-3,
-            verbose = True
-        )
-        return solver.run(self.state.water_pressure).params
-
-
+    
