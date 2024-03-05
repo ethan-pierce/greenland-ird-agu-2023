@@ -293,13 +293,13 @@ tests = ["pytest", "pytest-cov", "pytest-xdist"]
 
 [[package]]
 name = "equinox"
-version = "0.11.2"
+version = "0.11.3"
 description = "Elegant easy-to-use neural networks in JAX."
 optional = false
 python-versions = "~=3.9"
 files = [
-    {file = "equinox-0.11.2-py3-none-any.whl", hash = "sha256:727129a2e74ae21870d151526c71a8983125a658d77a100318f3096c4123b9dc"},
-    {file = "equinox-0.11.2.tar.gz", hash = "sha256:fc1931fced54ac4d938b701709ffb9d6fda0cdd631d9899ffaccdca90babb8cc"},
+    {file = "equinox-0.11.3-py3-none-any.whl", hash = "sha256:04cf3faaf2b977ff1f7f89b7bf69c4e825d084c0bf59c6ccc19adba320d4b4a1"},
+    {file = "equinox-0.11.3.tar.gz", hash = "sha256:a1273cc28c60d3131ac596f8a0f5c7dd384729e6cddae86e7be05f026880e8e0"},
 ]
 
 [package.dependencies]
