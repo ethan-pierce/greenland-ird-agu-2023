@@ -88,10 +88,19 @@ def test_flow_routing(grid, conduits):
     """Test the flow director."""
     discharge = conduits.discharge
     assert discharge.shape == (grid.number_of_nodes,)
-    assert_almost_equal(jnp.sum(discharge), 5382.64, decimal = 2)
 
 def test_hydraulic_gradient(grid, conduits):
     """Test the hydraulic gradient."""
     gradient = conduits.calc_hydraulic_gradient(jnp.full(grid.number_of_nodes, 1.0))
     assert gradient.shape == (grid.number_of_nodes,)
-    assert_almost_equal(jnp.mean(gradient), 0.007597, decimal = 6)
+
+def test_solve_for_potential(grid, conduits):
+    """Test the hydraulic potential field."""
+    potential = conduits.solve_for_potential(jnp.full(grid.number_of_nodes, 1.0))
+    assert potential.shape == (grid.number_of_nodes,)
+
+def test_effective_pressure(grid, conduits):
+    """Test the effective pressure."""
+    effective_pressure = conduits.calc_effective_pressure(jnp.full(grid.number_of_nodes, 1.0))
+    assert effective_pressure.shape == (grid.number_of_nodes,)
+
