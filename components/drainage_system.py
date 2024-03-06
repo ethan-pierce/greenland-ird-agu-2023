@@ -1,4 +1,4 @@
-"""Model subglacial hydrology through a series of conduits."""
+"""Model subglacial hydrology in an evolving network of conduits."""
 
 import numpy as np
 import jax
@@ -12,8 +12,8 @@ from landlab.components import FlowAccumulator
 from utils import StaticGrid
 from components import ModelState
 
-class ConduitHydrology(eqx.Module):
-    """Implement a model of subglacial hydrology through a series of conduits."""
+class SubglacialDrainageSystem(eqx.Module):
+    """Model subglacial conduit evolution, discharge, and pressure."""
 
     state: ModelState
     grid: StaticGrid = eqx.field(init = False)
@@ -54,9 +54,9 @@ class ConduitHydrology(eqx.Module):
             * self.state.bedrock_slope
         )
 
-        self.discharge = self.route_flow(self.landlab_grid)
+        self.discharge = self._route_flow(self.landlab_grid)
 
-    def route_flow(self, landlab_grid) -> jnp.array:
+    def _route_flow(self, landlab_grid) -> jnp.array:
         """Route discharge based on the hydraulic potential field."""
         fa = FlowAccumulator(
             landlab_grid, 
@@ -69,7 +69,7 @@ class ConduitHydrology(eqx.Module):
 
         return discharge
 
-    def calc_hydraulic_gradient(self, conduit_size: jnp.array) -> jnp.array:
+    def _calc_hydraulic_gradient(self, conduit_size: jnp.array) -> jnp.array:
         """Calculate the hydraulic gradient through a conduit."""
         gradient = (
             (self.discharge * self.flow_coeff * conduit_size**self.flow_exp)**2
@@ -77,7 +77,7 @@ class ConduitHydrology(eqx.Module):
 
         return gradient
 
-    def solve_for_potential(self, gradient_at_nodes: jnp.array) -> jnp.array:
+    def _solve_for_potential(self, gradient_at_nodes: jnp.array) -> jnp.array:
         """Solve for the hydraulic potential field."""
         gradient = self.grid.map_mean_of_link_nodes_to_link(gradient_at_nodes)
         
@@ -107,15 +107,15 @@ class ConduitHydrology(eqx.Module):
 
         return solution
 
-    def calc_effective_pressure(self, potential: jnp.array) -> jnp.array:
+    def _calc_effective_pressure(self, potential: jnp.array) -> jnp.array:
         """Calculate the effective pressure."""
         return self.geometric_gradient - potential
 
-    def calc_conduits_roc(self, conduit_size: jnp.array) -> jnp.array:
+    def _calc_conduits_roc(self, conduit_size: jnp.array) -> jnp.array:
         """Calculate the rate of closure of the conduits."""
-        gradient = self.calc_hydraulic_gradient(conduit_size)
-        potential = self.solve_for_potential(gradient)
-        pressure = self.calc_effective_pressure(potential)
+        gradient = self._calc_hydraulic_gradient(conduit_size)
+        potential = self._solve_for_potential(gradient)
+        pressure = self._calc_effective_pressure(potential)
 
         melt_opening = self.opening_coeff * self.discharge * gradient
 
@@ -136,10 +136,10 @@ class ConduitHydrology(eqx.Module):
     @jax.jit
     def update_conduits(self, dt: float):
         """Update the size of the conduits and return an updated copy of this object."""
-        k1 = self.calc_conduits_roc(self.conduit_size)
-        k2 = self.calc_conduits_roc(self.conduit_size + dt / 2 * k1)
-        k3 = self.calc_conduits_roc(self.conduit_size + dt / 2 * k2)
-        k4 = self.calc_conduits_roc(self.conduit_size + dt * k3)
+        k1 = self._calc_conduits_roc(self.conduit_size)
+        k2 = self._calc_conduits_roc(self.conduit_size + dt / 2 * k1)
+        k3 = self._calc_conduits_roc(self.conduit_size + dt / 2 * k2)
+        k4 = self._calc_conduits_roc(self.conduit_size + dt * k3)
 
         new_conduit_size = self.conduit_size + dt / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
 

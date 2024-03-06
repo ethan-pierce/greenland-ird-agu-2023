@@ -8,8 +8,7 @@ import pytest
 
 from landlab import TriangleModelGrid
 from utils import StaticGrid, freeze_grid
-from utils.plotting import plot_triangle_mesh, plot_links, timer
-from components import ConduitHydrology, ModelState
+from components import SubglacialDrainageSystem, ModelState
 
 @pytest.fixture
 def grid():
@@ -76,41 +75,40 @@ def state(grid):
     )
 
 @pytest.fixture
-def conduits(state, grid):
-    """Create an instance of the ConduitHydrology model."""
-    return ConduitHydrology(
+def model(state, grid):
+    """Create an instance of the SubglacialDrainageSystem model."""
+    return SubglacialDrainageSystem(
         state,
         grid,
         np.full(state.grid.number_of_nodes, 1e-3),
     )
 
-def test_flow_routing(grid, conduits):
+def test_flow_routing(grid, model):
     """Test the flow director."""
-    discharge = conduits.discharge
+    discharge = model.discharge
     assert discharge.shape == (grid.number_of_nodes,)
 
-def test_hydraulic_gradient(grid, conduits):
+def test_hydraulic_gradient(grid, model):
     """Test the hydraulic gradient."""
-    gradient = conduits.calc_hydraulic_gradient(jnp.full(grid.number_of_nodes, 1.0))
+    gradient = model._calc_hydraulic_gradient(jnp.full(grid.number_of_nodes, 1.0))
     assert gradient.shape == (grid.number_of_nodes,)
 
-def test_solve_for_potential(grid, conduits):
+def test_solve_for_potential(grid, model):
     """Test the hydraulic potential field."""
-    potential = conduits.solve_for_potential(jnp.full(grid.number_of_nodes, 1.0))
+    potential = model._solve_for_potential(jnp.full(grid.number_of_nodes, 1.0))
     assert potential.shape == (grid.number_of_nodes,)
 
-def test_effective_pressure(grid, conduits):
+def test_effective_pressure(grid, model):
     """Test the effective pressure."""
-    effective_pressure = conduits.calc_effective_pressure(jnp.full(grid.number_of_nodes, 1.0))
+    effective_pressure = model._calc_effective_pressure(jnp.full(grid.number_of_nodes, 1.0))
     assert effective_pressure.shape == (grid.number_of_nodes,)
 
-def test_conduits_roc(grid, conduits):
+def test_conduits_roc(grid, model):
     """Test the rate of closure of the conduits."""
-    roc = conduits.calc_conduits_roc(jnp.full(grid.number_of_nodes, 1.0))
+    roc = model._calc_conduits_roc(jnp.full(grid.number_of_nodes, 1.0))
     assert roc.shape == (grid.number_of_nodes,)
 
-def test_update_conduits(grid, conduits):
+def test_update_conduits(grid, model):
     """Test the update of the conduits."""
-    conduits = conduits.update_conduits(dt = 1.0)
-    assert conduits.conduit_size.shape == (grid.number_of_nodes,)
-
+    model = model.update_conduits(dt = 1.0)
+    assert model.conduit_size.shape == (grid.number_of_nodes,)
