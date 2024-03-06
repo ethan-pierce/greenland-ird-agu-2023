@@ -6,6 +6,19 @@ import matplotlib.colors
 import matplotlib.patches
 import matplotlib.collections
 
+import time
+
+def timer(func):
+    def wrapper(*args, **kwargs):
+        start = time.time()
+        result = func(*args, **kwargs)
+        duration = time.time() - start
+        wrapper.total_time += duration
+        print(f"Execution time: {duration}")
+        return result
+
+    wrapper.total_time = 0
+    return wrapper
 
 def plot_triangle_mesh(
     grid, 

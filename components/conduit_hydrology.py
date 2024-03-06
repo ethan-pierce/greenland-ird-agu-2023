@@ -19,7 +19,7 @@ class ConduitHydrology(eqx.Module):
     grid: StaticGrid = eqx.field(init = False)
     landlab_grid: ModelGrid = eqx.field(static = True)
     
-    conduit_area: jnp.array = eqx.field(converter = jnp.asarray)
+    conduit_size: jnp.array = eqx.field(converter = jnp.asarray)
     total_melt_rate: jnp.array = eqx.field(converter = jnp.asarray, init = False)
     base_potential: jnp.array = eqx.field(converter = jnp.asarray, init = False)
     geometric_gradient: jnp.array = eqx.field(converter = jnp.asarray, init = False)
@@ -77,9 +77,8 @@ class ConduitHydrology(eqx.Module):
 
         return gradient
 
-    def solve_for_potential(self, conduit_size: jnp.array) -> jnp.array:
+    def solve_for_potential(self, gradient_at_nodes: jnp.array) -> jnp.array:
         """Solve for the hydraulic potential field."""
-        gradient_at_nodes = self.calc_hydraulic_gradient(conduit_size)
         gradient = self.grid.map_mean_of_link_nodes_to_link(gradient_at_nodes)
         
         inactive_links = (
@@ -108,12 +107,44 @@ class ConduitHydrology(eqx.Module):
 
         return solution
 
-    def calc_effective_pressure(self, conduit_size: jnp.array) -> jnp.array:
+    def calc_effective_pressure(self, potential: jnp.array) -> jnp.array:
         """Calculate the effective pressure."""
-        potential = self.solve_for_potential(conduit_size)
         return self.geometric_gradient - potential
 
-    
+    def calc_conduits_roc(self, conduit_size: jnp.array) -> jnp.array:
+        """Calculate the rate of closure of the conduits."""
+        gradient = self.calc_hydraulic_gradient(conduit_size)
+        potential = self.solve_for_potential(gradient)
+        pressure = self.calc_effective_pressure(potential)
 
+        melt_opening = self.opening_coeff * self.discharge * gradient
 
-    
+        gap_opening = (
+            jnp.abs(
+                self.grid.map_mean_of_links_to_node(
+                    self.state.sliding_velocity / self.state.sec_per_a
+                )
+            )
+            * self.step_height
+            * (1 - jnp.tanh(conduit_size / self.scale_cutoff))
+        )
+
+        closure = self.closure_coeff * pressure**self.n * conduit_size
+
+        return melt_opening + gap_opening - closure
+
+    @jax.jit
+    def update_conduits(self, dt: float):
+        """Update the size of the conduits and return an updated copy of this object."""
+        k1 = self.calc_conduits_roc(self.conduit_size)
+        k2 = self.calc_conduits_roc(self.conduit_size + dt / 2 * k1)
+        k3 = self.calc_conduits_roc(self.conduit_size + dt / 2 * k2)
+        k4 = self.calc_conduits_roc(self.conduit_size + dt * k3)
+
+        new_conduit_size = self.conduit_size + dt / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
+
+        return eqx.tree_at(
+            lambda tree: tree.conduit_size,
+            self,
+            new_conduit_size
+        )

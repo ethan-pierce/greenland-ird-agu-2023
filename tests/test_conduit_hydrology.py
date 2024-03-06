@@ -8,7 +8,7 @@ import pytest
 
 from landlab import TriangleModelGrid
 from utils import StaticGrid, freeze_grid
-from utils.plotting import plot_triangle_mesh, plot_links
+from utils.plotting import plot_triangle_mesh, plot_links, timer
 from components import ConduitHydrology, ModelState
 
 @pytest.fixture
@@ -81,7 +81,7 @@ def conduits(state, grid):
     return ConduitHydrology(
         state,
         grid,
-        np.full(state.grid.number_of_links, 1e-3),
+        np.full(state.grid.number_of_nodes, 1e-3),
     )
 
 def test_flow_routing(grid, conduits):
@@ -103,4 +103,14 @@ def test_effective_pressure(grid, conduits):
     """Test the effective pressure."""
     effective_pressure = conduits.calc_effective_pressure(jnp.full(grid.number_of_nodes, 1.0))
     assert effective_pressure.shape == (grid.number_of_nodes,)
+
+def test_conduits_roc(grid, conduits):
+    """Test the rate of closure of the conduits."""
+    roc = conduits.calc_conduits_roc(jnp.full(grid.number_of_nodes, 1.0))
+    assert roc.shape == (grid.number_of_nodes,)
+
+def test_update_conduits(grid, conduits):
+    """Test the update of the conduits."""
+    conduits = conduits.update_conduits(dt = 1.0)
+    assert conduits.conduit_size.shape == (grid.number_of_nodes,)
 
