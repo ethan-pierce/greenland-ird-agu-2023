@@ -7,7 +7,7 @@ import equinox as eqx
 import jaxopt
 
 from landlab import ModelGrid
-from landlab.components import FlowAccumulator
+from landlab.components import FlowAccumulator, FlowDirectorMFD
 
 from utils import StaticGrid
 from components import ModelState
@@ -24,6 +24,7 @@ class SubglacialDrainageSystem(eqx.Module):
     base_potential: jnp.array = eqx.field(converter = jnp.asarray, init = False)
     geometric_gradient: jnp.array = eqx.field(converter = jnp.asarray, init = False)
     discharge: jnp.array = eqx.field(converter = jnp.asarray, init = False)
+    flow_direction: jnp.array = eqx.field(converter = jnp.asarray, init = False)
 
     opening_coeff: float = 1.3455e-9 # J^-1 m^3
     closure_coeff: float = 7.11e-24 # Pa^-3 s^-1
@@ -56,6 +57,14 @@ class SubglacialDrainageSystem(eqx.Module):
 
         self.discharge = self._route_flow(self.landlab_grid)
 
+        # Flow goes from high potential to low potential, but links go from tail to head
+        self.flow_direction = jnp.where(
+            self.base_potential[self.grid.node_at_link_head] >
+            self.base_potential[self.grid.node_at_link_tail],
+            1,
+            -1
+        )
+
     def _route_flow(self, landlab_grid) -> jnp.array:
         """Route discharge based on the hydraulic potential field."""
         fa = FlowAccumulator(
@@ -72,14 +81,17 @@ class SubglacialDrainageSystem(eqx.Module):
     def _calc_hydraulic_gradient(self, conduit_size: jnp.array) -> jnp.array:
         """Calculate the hydraulic gradient through a conduit."""
         gradient = (
-            (self.discharge * self.flow_coeff * conduit_size**self.flow_exp)**2
+            (self.discharge / (self.flow_coeff * conduit_size**self.flow_exp))**2
         )
 
         return gradient
 
     def _solve_for_potential(self, gradient_at_nodes: jnp.array) -> jnp.array:
         """Solve for the hydraulic potential field."""
-        gradient = self.grid.map_mean_of_link_nodes_to_link(gradient_at_nodes)
+        gradient = (
+            self.grid.map_mean_of_link_nodes_to_link(gradient_at_nodes)
+            * self.flow_direction
+        )
         
         inactive_links = (
             (self.grid.status_at_node[self.grid.node_at_link_head] != 0)
@@ -87,9 +99,15 @@ class SubglacialDrainageSystem(eqx.Module):
             (self.grid.status_at_node[self.grid.node_at_link_tail] != 0)
         )
 
+        # gradient = jnp.where(
+        #     inactive_links,
+        #     self.grid.calc_grad_at_link(self.base_potential),
+        #     gradient
+        # )
+
         gradient = jnp.where(
             inactive_links,
-            self.grid.map_mean_of_link_nodes_to_link(self.geometric_gradient),
+            0.0,
             gradient
         )
 
@@ -102,20 +120,36 @@ class SubglacialDrainageSystem(eqx.Module):
         solution = jaxopt.linear_solve.solve_cg(
             matvec = laplace,
             b = div_f,
-            tol = 1e-3
+            tol = 1e-6
         )
 
         return solution
 
     def _calc_effective_pressure(self, potential: jnp.array) -> jnp.array:
         """Calculate the effective pressure."""
-        return self.geometric_gradient - potential
+        pressure = (
+            self.state.ice_density * self.state.gravity * self.state.surface_slope
+            + (self.state.water_density - self.state.ice_density) 
+            * self.state.gravity * self.state.bedrock_slope
+            - potential
+        )
+
+        pressure = jnp.where(pressure <= 0, 0.0, pressure)
+
+        pressure = jnp.where(
+            pressure >= self.state.overburden_pressure, 
+            self.state.overburden_pressure,
+            pressure
+        )
+
+        return pressure
 
     def _calc_conduits_roc(self, conduit_size: jnp.array) -> jnp.array:
         """Calculate the rate of closure of the conduits."""
-        gradient = self._calc_hydraulic_gradient(conduit_size)
-        potential = self._solve_for_potential(gradient)
-        pressure = self._calc_effective_pressure(potential)
+        internal_state = self.get_state(conduit_size)
+        gradient = internal_state['hydraulic_gradient']
+        potential = internal_state['hydraulic_potential']
+        pressure = internal_state['effective_pressure']
 
         melt_opening = self.opening_coeff * self.discharge * gradient
 
@@ -126,10 +160,10 @@ class SubglacialDrainageSystem(eqx.Module):
                 )
             )
             * self.step_height
-            * (1 - jnp.tanh(conduit_size / self.scale_cutoff))
+            * (1 - (conduit_size / self.scale_cutoff))
         )
 
-        closure = self.closure_coeff * pressure**self.n * conduit_size
+        closure = self.closure_coeff * jnp.abs(pressure)**self.n * conduit_size
 
         return melt_opening + gap_opening - closure
 
@@ -148,3 +182,22 @@ class SubglacialDrainageSystem(eqx.Module):
             self,
             new_conduit_size
         )
+
+    def get_state(self, conduit_size: jnp.array = None):
+        """Return the current state of solution variables."""
+        if conduit_size is None:
+            conduit_size = self.conduit_size
+
+        gradient = self._calc_hydraulic_gradient(conduit_size)
+        potential = self._solve_for_potential(gradient)
+        pressure = self._calc_effective_pressure(potential)
+
+        return {
+            'hydraulic_gradient': gradient,
+            'hydraulic_potential': potential,
+            'effective_pressure': pressure
+        }
+
+    def update_state():
+        """TODO"""
+        pass
