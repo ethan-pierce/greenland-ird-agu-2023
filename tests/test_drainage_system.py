@@ -44,7 +44,7 @@ def make_grid():
     
     g.add_field(
         'sliding_velocity',
-        g.map_mean_of_link_nodes_to_link(np.max(g.node_x) + g.node_x),
+        g.map_mean_of_link_nodes_to_link((np.max(g.node_x) + g.node_x) * 0.5),
         at = 'link'
     )
 
@@ -59,6 +59,12 @@ def make_grid():
         np.full(g.number_of_nodes, 0.05 * 31556926),
         at = 'node'
     )
+
+    g.add_field(
+        'surface_melt_rate',
+        np.full(g.number_of_nodes, 3.45e-8),
+        at = 'node'
+    ) # in m/s, corresponds to 0.25 cm/day
 
     return g
 
@@ -85,6 +91,7 @@ def model(state, grid):
         state,
         grid,
         np.full(state.grid.number_of_nodes, 1e-3),
+        grid.at_node['surface_melt_rate']
     )
 
 def test_flow_routing(grid, model):
@@ -135,13 +142,7 @@ if __name__ == '__main__':
         state,
         grid,
         np.full(state.grid.number_of_nodes, 1e-3),
+        grid.at_node['surface_melt_rate']
     )
 
-    for i in range(60):
-        model = model.update_conduits(dt = 60.0)
-
-        if i % 100 == 0:
-            print(f"Iteration {i+1}: Mean Conduit Size = {np.mean(model.conduit_size):.2f}")
-
-    plot_triangle_mesh(grid, model.get_state()['effective_pressure'])
-    plot_triangle_mesh(grid, model.conduit_size)
+    plot_triangle_mesh(grid, model.total_melt_rate * 100 * 60 * 60 * 24, title = 'Melt input (cm day$^{-1}$)')

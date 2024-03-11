@@ -20,6 +20,7 @@ class SubglacialDrainageSystem(eqx.Module):
     landlab_grid: ModelGrid = eqx.field(static = True)
     
     conduit_size: jnp.array = eqx.field(converter = jnp.asarray)
+    surface_melt_rate: jnp.array = eqx.field(converter = jnp.asarray)
     total_melt_rate: jnp.array = eqx.field(converter = jnp.asarray, init = False)
     base_potential: jnp.array = eqx.field(converter = jnp.asarray, init = False)
     geometric_gradient: jnp.array = eqx.field(converter = jnp.asarray, init = False)
@@ -42,7 +43,8 @@ class SubglacialDrainageSystem(eqx.Module):
             self.state.melt_rate 
             * (self.state.water_density / self.state.ice_density)
             / self.state.sec_per_a
-        ) + 3.5e-7 # Pretend this is ~3 cm per day of surface melt
+            + self.surface_melt_rate
+        )
 
         self.base_potential = (
             self.state.water_density * self.state.gravity * self.state.bedrock_elevation
