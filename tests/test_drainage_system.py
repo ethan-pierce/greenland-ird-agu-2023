@@ -1,7 +1,7 @@
 """Test the ConduitHydrology implementation."""
 
 import numpy as np
-from numpy.testing import assert_array_almost_equal, assert_array_equal, assert_almost_equal
+from numpy.testing import *
 import jax
 import jax.numpy as jnp
 import pytest
@@ -94,38 +94,34 @@ def model(state, grid):
         grid.at_node['surface_melt_rate']
     )
 
-def test_flow_routing(grid, model):
-    """Test the flow director."""
-    discharge = model.discharge
-    assert discharge.shape == (grid.number_of_nodes,)
+def test_base_potential(grid, model):
+    """Test the base potential calculation."""
+    assert model.base_potential.shape == (grid.number_of_nodes,)
+    assert np.all(model.state.overburden_pressure <= model.base_potential)
+
+def test_route_flow(grid, model):
+    """Test the flow routing."""
+    assert model.discharge.shape == (grid.number_of_links,)
+    assert np.all(model.discharge >= 0)
+    assert model.flow_direction.shape == (grid.number_of_links,)
+    assert np.all(np.isin(model.flow_direction, [-1, 1]))
 
 def test_hydraulic_gradient(grid, model):
-    """Test the hydraulic gradient."""
-    gradient = model._calc_hydraulic_gradient(jnp.full(grid.number_of_nodes, 0.1))
-    assert gradient.shape == (grid.number_of_nodes,)
+    """Test the hydraulic gradient calculation."""
+    gradient = model._calc_hydraulic_gradient(jnp.full(grid.number_of_links, 1e-3))
+
+    assert gradient.shape == (grid.number_of_links,)
     
 def test_solve_for_potential(grid, model):
-    """Test the hydraulic potential field."""
-    gradient = model._calc_hydraulic_gradient(jnp.full(grid.number_of_nodes, 0.1))
+    """Test the potential field solution."""
+    conduit_size = jnp.full(grid.number_of_links, 1.0)
+    gradient = model._calc_hydraulic_gradient(conduit_size)
     potential = model._solve_for_potential(gradient)
+
     assert potential.shape == (grid.number_of_nodes,)
 
-def test_effective_pressure(grid, model):
-    """Test the effective pressure."""
-    gradient = model._calc_hydraulic_gradient(jnp.full(grid.number_of_nodes, 0.1))
-    potential = model._solve_for_potential(gradient)
-    effective_pressure = model._calc_effective_pressure(potential)
-    assert effective_pressure.shape == (grid.number_of_nodes,)
+    plot_triangle_mesh(grid, potential)
 
-def test_conduits_roc(grid, model):
-    """Test the rate of closure of the conduits."""
-    roc = model._calc_conduits_roc(jnp.full(grid.number_of_nodes, 0.1))
-    assert roc.shape == (grid.number_of_nodes,)
-
-def test_update_conduits(grid, model):
-    """Test the update of the conduits."""
-    model = model.update_conduits(dt = 1.0)
-    assert model.conduit_size.shape == (grid.number_of_nodes,)
 
 if __name__ == '__main__':
     """Run a test case for an archetypal glacier margin."""

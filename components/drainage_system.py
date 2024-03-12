@@ -76,53 +76,36 @@ class SubglacialDrainageSystem(eqx.Module):
             flow_director = 'FlowDirectorMFD'
         )
 
-        area, discharge = fa.accumulate_flow(update_depression_finder = False)
+        _, discharge = fa.accumulate_flow(update_depression_finder = False)
 
-        return discharge
+        return self.grid.map_mean_of_link_nodes_to_link(discharge)
 
     def _calc_hydraulic_gradient(self, conduit_size: jnp.array) -> jnp.array:
         """Calculate the hydraulic gradient through a conduit."""
         gradient = (
-            (self.discharge / (self.flow_coeff * conduit_size**self.flow_exp))**2
-        )
+            -(self.discharge / (self.flow_coeff * conduit_size**self.flow_exp))**2
+        ) * self.flow_direction
 
         return gradient
 
-    def _solve_for_potential(self, gradient_at_nodes: jnp.array) -> jnp.array:
+    def _solve_for_potential(self, gradient: jnp.array) -> jnp.array:
         """Solve for the hydraulic potential field."""
-        gradient = (
-            self.grid.map_mean_of_link_nodes_to_link(gradient_at_nodes)
-            * self.flow_direction
-        )
-        
-        inactive_links = (
-            (self.grid.status_at_node[self.grid.node_at_link_head] != 0)
-            |
-            (self.grid.status_at_node[self.grid.node_at_link_tail] != 0)
-        )
+        #TODO apply boundary conditions
 
-        # gradient = jnp.where(
-        #     inactive_links,
-        #     self.grid.calc_grad_at_link(self.base_potential),
-        #     gradient
-        # )
+        gradient_across_faces = gradient * self.grid.length_of_face[self.grid.face_at_link]
+        forcing = self.grid.calc_flux_div_at_node(gradient_across_faces)
 
-        gradient = jnp.where(
-            inactive_links,
-            0.0,
-            gradient
-        )
-
-        div_f = self.grid.calc_flux_div_at_node(gradient)
-
-        laplace = lambda x: self.grid.calc_flux_div_at_node(
-            self.grid.calc_grad_at_link(x)
+        matvec = lambda phi: self.grid.calc_flux_div_at_node(
+            self.grid.calc_grad_at_link(
+                jnp.where(self.grid.status_at_node != 0, grav_potential, phi)
+            )
         )
 
         solution = jaxopt.linear_solve.solve_cg(
-            matvec = laplace,
-            b = div_f,
-            tol = 1e-6
+            matvec = matvec,
+            b = forcing,
+            tol = 1e-6,
+            maxiter = 30
         )
 
         return solution
@@ -130,19 +113,19 @@ class SubglacialDrainageSystem(eqx.Module):
     def _calc_effective_pressure(self, potential: jnp.array) -> jnp.array:
         """Calculate the effective pressure."""
         pressure = (
-            self.state.ice_density * self.state.gravity * self.state.surface_slope
+            self.state.ice_density * self.state.gravity * self.state.surface_elevation
             + (self.state.water_density - self.state.ice_density) 
-            * self.state.gravity * self.state.bedrock_slope
+            * self.state.gravity * self.state.bedrock_elevation
             - potential
         )
 
-        pressure = jnp.where(pressure <= 0, 0.0, pressure)
+        # pressure = jnp.where(pressure <= 0, 0.0, pressure)
 
-        pressure = jnp.where(
-            pressure >= self.state.overburden_pressure, 
-            self.state.overburden_pressure,
-            pressure
-        )
+        # pressure = jnp.where(
+        #     pressure >= self.state.overburden_pressure, 
+        #     self.state.overburden_pressure,
+        #     pressure
+        # )
 
         return pressure
 
