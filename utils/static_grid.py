@@ -40,6 +40,7 @@ class StaticGrid(eqx.Module):
     links_at_node: jax.Array = eqx.field(converter = jnp.asarray)
     link_dirs_at_node: jax.Array = eqx.field(converter = jnp.asarray)
     face_at_link: jax.Array = eqx.field(converter = jnp.asarray)
+    link_at_face: jax.Array = eqx.field(converter = jnp.asarray)
     cell_at_node: jax.Array = eqx.field(converter = jnp.asarray)
     corners_at_face: jax.Array = eqx.field(converter = jnp.asarray)
     nodes_at_patch: jax.Array = eqx.field(converter = jnp.asarray)
@@ -163,12 +164,18 @@ class StaticGrid(eqx.Module):
             self.length_of_link
         )
 
-    def calc_flux_div_at_node(self, array, dirichlet_boundary = 0.0):
+    def calc_flux_div_at_node(self, array):
         """At each node, calculate the divergence of an array of fluxes defined on links."""
+        face_flux = jnp.where(
+            self.face_at_link != -1,
+            array * self.length_of_face[self.face_at_link],
+            0.0
+        )
+
         return jnp.where(
-            self.cell_area_at_node == 0,
-            dirichlet_boundary,
-            jnp.divide(self.sum_at_nodes(array), self.cell_area_at_node),
+            self.cell_area_at_node != 0,
+            self.sum_at_nodes(face_flux) / self.cell_area_at_node,
+            0.0
         )
 
 def freeze_grid(grid) -> StaticGrid:

@@ -4,6 +4,7 @@ import numpy as np
 from numpy.testing import *
 import jax
 import jax.numpy as jnp
+import equinox as eqx
 import pytest
 
 from landlab import TriangleModelGrid
@@ -25,7 +26,7 @@ def make_grid():
 
     g.add_field(
         'surface_elevation', 
-        (np.max(g.node_x) - g.node_x)**(1/3) * 50,
+        (np.max(g.node_x) - g.node_x)**(1/3) * 50 + 5.,
         at = 'node'
     )
 
@@ -108,10 +109,11 @@ def test_route_flow(grid, model):
 
 def test_hydraulic_gradient(grid, model):
     """Test the hydraulic gradient calculation."""
-    gradient = model._calc_hydraulic_gradient(jnp.full(grid.number_of_links, 1e-3))
+    gradient = model._calc_hydraulic_gradient(jnp.full(grid.number_of_links, 1.0))
 
     assert gradient.shape == (grid.number_of_links,)
-    
+    assert np.all(np.sign(gradient) == np.sign(model.flow_direction * model.discharge))
+
 def test_solve_for_potential(grid, model):
     """Test the potential field solution."""
     conduit_size = jnp.full(grid.number_of_links, 1.0)
@@ -120,8 +122,25 @@ def test_solve_for_potential(grid, model):
 
     assert potential.shape == (grid.number_of_nodes,)
 
-    plot_triangle_mesh(grid, potential)
+def test_effective_pressure(grid, model):
+    """Test the effective pressure calculation."""
+    conduit_size = jnp.full(grid.number_of_links, 1.0)
+    gradient = model._calc_hydraulic_gradient(conduit_size)
+    potential = model._solve_for_potential(gradient)
+    pressure = model._calc_effective_pressure(potential)
 
+    assert pressure.shape == (grid.number_of_nodes,)
+
+def test_conduit_size(grid, model):
+    """Test the conduit size calculation."""
+    conduit_size = jnp.full(grid.number_of_links, 1.0)
+    gradient = model._calc_hydraulic_gradient(conduit_size)
+    potential = model._solve_for_potential(gradient)
+    pressure = model._calc_effective_pressure(potential)
+    updated_conduit_size = model._calc_conduit_size(gradient, pressure)
+
+    assert updated_conduit_size.shape == (grid.number_of_links,)
+    assert np.all(updated_conduit_size > 0)
 
 if __name__ == '__main__':
     """Run a test case for an archetypal glacier margin."""
@@ -137,8 +156,19 @@ if __name__ == '__main__':
     model = SubglacialDrainageSystem(
         state,
         grid,
-        np.full(state.grid.number_of_nodes, 1e-3),
+        np.full(state.grid.number_of_links, 1e-3),
         grid.at_node['surface_melt_rate']
     )
+    initial_conduit_size = model.discharge / np.max(model.discharge) * 0.1 + 1e-3
+    model = eqx.tree_at(
+        lambda tree: tree.conduit_size,
+        model,
+        initial_conduit_size
+    )
 
-    plot_triangle_mesh(grid, model.total_melt_rate * 100 * 60 * 60 * 24, title = 'Melt input (cm day$^{-1}$)')
+    S = initial_conduit_size
+    for i in range(5):
+        S += model._calc_conduit_roc(S) * 1.0
+
+        plot_links(grid, S, title = 'Conduit size (m$^2$)')
+        

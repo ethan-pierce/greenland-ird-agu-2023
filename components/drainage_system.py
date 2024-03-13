@@ -26,6 +26,7 @@ class SubglacialDrainageSystem(eqx.Module):
     geometric_gradient: jnp.array = eqx.field(converter = jnp.asarray, init = False)
     discharge: jnp.array = eqx.field(converter = jnp.asarray, init = False)
     flow_direction: jnp.array = eqx.field(converter = jnp.asarray, init = False)
+    inflow_outflow: jnp.array = eqx.field(converter = jnp.asarray, init = False)
 
     opening_coeff: float = 1.3455e-9 # J^-1 m^3
     closure_coeff: float = 7.11e-24 # Pa^-3 s^-1
@@ -44,7 +45,7 @@ class SubglacialDrainageSystem(eqx.Module):
             * (self.state.water_density / self.state.ice_density)
             / self.state.sec_per_a
             + self.surface_melt_rate
-        )
+        ) * self.grid.cell_area_at_node
 
         self.base_potential = (
             self.state.water_density * self.state.gravity * self.state.bedrock_elevation
@@ -57,15 +58,31 @@ class SubglacialDrainageSystem(eqx.Module):
             * self.state.bedrock_slope
         )
 
-        self.discharge = self._route_flow(self.landlab_grid)
-
         # Flow goes from high potential to low potential, but links go from tail to head
         self.flow_direction = jnp.where(
             self.base_potential[self.grid.node_at_link_head] >
             self.base_potential[self.grid.node_at_link_tail],
-            1,
-            -1
+            -1,
+            1
         )
+
+        adjacent_potential = jnp.mean(
+            jnp.where(
+                self.grid.adjacent_nodes_at_node != -1,
+                self.base_potential[self.grid.adjacent_nodes_at_node],
+                0.0
+            ),
+            axis = 1
+        )
+
+        # 1 denotes inflow, -1 denotes outflow
+        self.inflow_outflow = jnp.where(
+            self.base_potential > adjacent_potential,
+            1 * (self.grid.status_at_node > 0),
+            -1 * (self.grid.status_at_node > 0)
+        )
+
+        self.discharge = self._route_flow(self.landlab_grid)
 
     def _route_flow(self, landlab_grid) -> jnp.array:
         """Route discharge based on the hydraulic potential field."""
@@ -78,111 +95,88 @@ class SubglacialDrainageSystem(eqx.Module):
 
         _, discharge = fa.accumulate_flow(update_depression_finder = False)
 
+        # Enforce discharge = 0 at inflow boundaries
+        discharge = jnp.where(
+            self.inflow_outflow == 1,
+            0.0,
+            discharge
+        )
+
         return self.grid.map_mean_of_link_nodes_to_link(discharge)
 
     def _calc_hydraulic_gradient(self, conduit_size: jnp.array) -> jnp.array:
         """Calculate the hydraulic gradient through a conduit."""
         gradient = (
-            -(self.discharge / (self.flow_coeff * conduit_size**self.flow_exp))**2
+            (self.discharge / (self.flow_coeff * conduit_size**self.flow_exp))**2
         ) * self.flow_direction
 
         return gradient
 
-    def _solve_for_potential(self, gradient: jnp.array) -> jnp.array:
-        """Solve for the hydraulic potential field."""
-        #TODO apply boundary conditions
-
-        gradient_across_faces = gradient * self.grid.length_of_face[self.grid.face_at_link]
-        forcing = self.grid.calc_flux_div_at_node(gradient_across_faces)
-
-        matvec = lambda phi: self.grid.calc_flux_div_at_node(
-            self.grid.calc_grad_at_link(
-                jnp.where(self.grid.status_at_node != 0, grav_potential, phi)
-            )
+    def _matvec(self, potential: jnp.array) -> jnp.array:
+        """Calculate the residual for the potential field."""
+        potential = jnp.where(
+            self.inflow_outflow == -1,
+            self.state.water_density * self.state.gravity * self.state.bedrock_elevation,
+            potential
         )
 
-        solution = jaxopt.linear_solve.solve_cg(
-            matvec = matvec,
-            b = forcing,
-            tol = 1e-6,
-            maxiter = 30
+        return self.grid.calc_flux_div_at_node(
+            self.grid.calc_grad_at_link(potential)
+        )
+
+    def _solve_for_potential(self, gradient: jnp.array) -> jnp.array:
+        """Solve for the hydraulic potential field."""
+        solution = jaxopt.linear_solve.solve_bicgstab(
+            matvec = self._matvec,
+            b = self.grid.calc_flux_div_at_node(gradient),
+            atol = 1e-3
         )
 
         return solution
 
     def _calc_effective_pressure(self, potential: jnp.array) -> jnp.array:
         """Calculate the effective pressure."""
-        pressure = (
-            self.state.ice_density * self.state.gravity * self.state.surface_elevation
-            + (self.state.water_density - self.state.ice_density) 
-            * self.state.gravity * self.state.bedrock_elevation
-            - potential
+        water_pressure = (
+            potential -
+            self.state.water_density * self.state.gravity * self.state.bedrock_elevation
         )
 
-        # pressure = jnp.where(pressure <= 0, 0.0, pressure)
-
-        # pressure = jnp.where(
-        #     pressure >= self.state.overburden_pressure, 
-        #     self.state.overburden_pressure,
-        #     pressure
-        # )
-
-        return pressure
-
-    def _calc_conduits_roc(self, conduit_size: jnp.array) -> jnp.array:
-        """Calculate the rate of closure of the conduits."""
-        internal_state = self.get_state(conduit_size)
-        gradient = internal_state['hydraulic_gradient']
-        potential = internal_state['hydraulic_potential']
-        pressure = internal_state['effective_pressure']
-
-        melt_opening = self.opening_coeff * self.discharge * gradient
-
-        gap_opening = (
-            jnp.abs(
-                self.grid.map_mean_of_links_to_node(
-                    self.state.sliding_velocity / self.state.sec_per_a
-                )
-            )
-            * self.step_height
-            * (1 - (conduit_size / self.scale_cutoff))
+        water_pressure = jnp.minimum(
+            jnp.maximum(
+                water_pressure,
+                0.0
+            ),
+            self.state.overburden_pressure
         )
 
-        closure = self.closure_coeff * jnp.abs(pressure)**self.n * conduit_size
+        return self.state.overburden_pressure - water_pressure
 
-        return melt_opening + gap_opening - closure
+    def _calc_conduit_roc(self, conduit_size: jnp.array) -> jnp.array:
+        """Calculate the rate at which conduits are expanding or contracting."""
+        gradient = self._calc_hydraulic_gradient(conduit_size)
+        potential = self._solve_for_potential(gradient)
+        effective_pressure = self.grid.map_mean_of_link_nodes_to_link(
+            self._calc_effective_pressure(potential)
+        )
+        effective_pressure = jnp.where(
+            effective_pressure < 1.0, 1.0, effective_pressure
+        )
+
+        melt_opening = self.opening_coeff * self.discharge * gradient * self.flow_direction
+        closure = self.closure_coeff * effective_pressure**self.n * conduit_size
+ 
+        return melt_opening - closure
 
     @jax.jit
-    def update_conduits(self, dt: float):
-        """Update the size of the conduits and return an updated copy of this object."""
-        k1 = self._calc_conduits_roc(self.conduit_size)
-        k2 = self._calc_conduits_roc(self.conduit_size + dt / 2 * k1)
-        k3 = self._calc_conduits_roc(self.conduit_size + dt / 2 * k2)
-        k4 = self._calc_conduits_roc(self.conduit_size + dt * k3)
-
-        new_conduit_size = self.conduit_size + dt / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
+    def update(self, dt: float):
+        """Advance the model by dt seconds."""
+        updated_conduit_size = jnp.maximum(
+            self.conduit_size + self._calc_conduit_roc(self.conduit_size) * dt,
+            1e-3
+        )
 
         return eqx.tree_at(
             lambda tree: tree.conduit_size,
             self,
-            new_conduit_size
+            updated_conduit_size
         )
-
-    def get_state(self, conduit_size: jnp.array = None):
-        """Return the current state of solution variables."""
-        if conduit_size is None:
-            conduit_size = self.conduit_size
-
-        gradient = self._calc_hydraulic_gradient(conduit_size)
-        potential = self._solve_for_potential(gradient)
-        pressure = self._calc_effective_pressure(potential)
-
-        return {
-            'hydraulic_gradient': gradient,
-            'hydraulic_potential': potential,
-            'effective_pressure': pressure
-        }
-
-    def update_state():
-        """TODO"""
-        pass
