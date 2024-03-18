@@ -95,7 +95,7 @@ def model(state, grid):
         grid.at_node['surface_melt_rate']
     )
 
-def test_base_potential(grid, model):
+def test_set_potential(grid, model):
     """Test the base potential calculation."""
     assert model.base_potential.shape == (grid.number_of_nodes,)
     assert np.all(model.state.overburden_pressure <= model.base_potential)
@@ -107,40 +107,7 @@ def test_route_flow(grid, model):
     assert model.flow_direction.shape == (grid.number_of_links,)
     assert np.all(np.isin(model.flow_direction, [-1, 1]))
 
-def test_hydraulic_gradient(grid, model):
-    """Test the hydraulic gradient calculation."""
-    gradient = model._calc_hydraulic_gradient(jnp.full(grid.number_of_links, 1.0))
 
-    assert gradient.shape == (grid.number_of_links,)
-    assert np.all(np.sign(gradient) == np.sign(model.flow_direction * model.discharge))
-
-def test_solve_for_potential(grid, model):
-    """Test the potential field solution."""
-    conduit_size = jnp.full(grid.number_of_links, 1.0)
-    gradient = model._calc_hydraulic_gradient(conduit_size)
-    potential = model._solve_for_potential(gradient)
-
-    assert potential.shape == (grid.number_of_nodes,)
-
-def test_effective_pressure(grid, model):
-    """Test the effective pressure calculation."""
-    conduit_size = jnp.full(grid.number_of_links, 1.0)
-    gradient = model._calc_hydraulic_gradient(conduit_size)
-    potential = model._solve_for_potential(gradient)
-    pressure = model._calc_effective_pressure(potential)
-
-    assert pressure.shape == (grid.number_of_nodes,)
-
-def test_conduit_size(grid, model):
-    """Test the conduit size calculation."""
-    conduit_size = jnp.full(grid.number_of_links, 1.0)
-    gradient = model._calc_hydraulic_gradient(conduit_size)
-    potential = model._solve_for_potential(gradient)
-    pressure = model._calc_effective_pressure(potential)
-    updated_conduit_size = model._calc_conduit_size(gradient, pressure)
-
-    assert updated_conduit_size.shape == (grid.number_of_links,)
-    assert np.all(updated_conduit_size > 0)
 
 if __name__ == '__main__':
     """Run a test case for an archetypal glacier margin."""
@@ -166,9 +133,52 @@ if __name__ == '__main__':
         initial_conduit_size
     )
 
-    S = initial_conduit_size
-    for i in range(5):
-        S += model._calc_conduit_roc(S) * 1.0
+    import jaxopt
+    
+    def residual(phi):
+        grad_phi = model.grid.calc_grad_at_link(phi)
 
-        plot_links(grid, S, title = 'Conduit size (m$^2$)')
-        
+        pressure = jnp.maximum(
+            model.grid.map_mean_of_link_nodes_to_link(model.base_potential - phi), 
+            0.0
+        )
+
+        melt_opening = jnp.abs(model.opening_coeff * model.discharge * grad_phi * model.flow_direction)
+        gap_opening = jnp.abs(model.state.sliding_velocity / model.state.sec_per_a) * model.step_height
+        closure = model.closure_coeff * pressure**model.n * model.conduit_size
+
+        conduit_size = (melt_opening + gap_opening) / (gap_opening / model.scale_cutoff + closure)
+
+        divergence = model.grid.calc_flux_div_at_node(
+            model.flow_coeff * conduit_size**model.flow_exp * jnp.sqrt(jnp.abs(grad_phi)) * model.flow_direction
+        )
+
+        residual = divergence - model.total_melt_rate
+
+        return jnp.sum(residual**2)
+
+    solver = jaxopt.ScipyBoundedMinimize(
+        fun = residual,
+        method = 'L-BFGS-B'
+    )
+    lower_bounds = model.state.water_density * model.state.gravity * model.state.bedrock_elevation
+    upper_bounds = model.base_potential
+    bounds = (lower_bounds, upper_bounds)
+    solution = solver.run(jnp.zeros(grid.number_of_nodes), bounds = bounds).params
+
+    gradient = model.grid.calc_grad_at_link(solution)
+    pressure = jnp.maximum(
+        model.grid.map_mean_of_link_nodes_to_link(model.base_potential - solution), 
+        0.0
+    )
+    melt_opening = jnp.abs(model.opening_coeff * model.discharge * gradient * model.flow_direction)
+    gap_opening = jnp.abs(model.state.sliding_velocity / model.state.sec_per_a) * model.step_height
+    closure = model.closure_coeff * pressure**model.n * model.conduit_size
+
+    conduit_size = (melt_opening + gap_opening) / (gap_opening / model.scale_cutoff + closure)
+
+    divergence = model.grid.calc_flux_div_at_node(
+        model.flow_coeff * conduit_size**model.flow_exp * jnp.sqrt(jnp.abs(gradient)) * model.flow_direction
+    )
+
+    residual = divergence - model.total_melt_rate

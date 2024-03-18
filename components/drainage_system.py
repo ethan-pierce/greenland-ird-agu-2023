@@ -47,6 +47,12 @@ class SubglacialDrainageSystem(eqx.Module):
             + self.surface_melt_rate
         ) * self.grid.cell_area_at_node
 
+        self._set_potential()
+        self._set_flow_direction()
+        self.discharge = self._route_flow(self.landlab_grid)
+
+    def _set_potential(self):
+        """Set the geometric components of the potential field."""
         self.base_potential = (
             self.state.water_density * self.state.gravity * self.state.bedrock_elevation
             + self.state.overburden_pressure
@@ -57,6 +63,9 @@ class SubglacialDrainageSystem(eqx.Module):
             -(self.state.water_density - self.state.ice_density) * self.state.gravity 
             * self.state.bedrock_slope
         )
+
+    def _set_flow_direction(self):
+        """Set the flow direction and inflow/outflow at each node."""
 
         # Flow goes from high potential to low potential, but links go from tail to head
         self.flow_direction = jnp.where(
@@ -82,7 +91,6 @@ class SubglacialDrainageSystem(eqx.Module):
             -1 * (self.grid.status_at_node > 0)
         )
 
-        self.discharge = self._route_flow(self.landlab_grid)
 
     def _route_flow(self, landlab_grid) -> jnp.array:
         """Route discharge based on the hydraulic potential field."""
@@ -103,6 +111,11 @@ class SubglacialDrainageSystem(eqx.Module):
         )
 
         return self.grid.map_mean_of_link_nodes_to_link(discharge)
+
+    def _calc_melt_opening(self, potential: jnp.array) -> jnp.array:
+        """Calculate the rate at which conduits are opening due to melt."""
+        gradient = self.grid.calc_grad_at_link(potential)
+        return jnp.abs(self.opening_coeff * self.discharge * gradient)
 
     def _calc_hydraulic_gradient(self, conduit_size: jnp.array) -> jnp.array:
         """Calculate the hydraulic gradient through a conduit."""
@@ -151,6 +164,7 @@ class SubglacialDrainageSystem(eqx.Module):
 
         return self.state.overburden_pressure - water_pressure
 
+    @jax.jit
     def _calc_conduit_roc(self, conduit_size: jnp.array) -> jnp.array:
         """Calculate the rate at which conduits are expanding or contracting."""
         gradient = self._calc_hydraulic_gradient(conduit_size)
@@ -165,7 +179,14 @@ class SubglacialDrainageSystem(eqx.Module):
         melt_opening = self.opening_coeff * self.discharge * gradient * self.flow_direction
         closure = self.closure_coeff * effective_pressure**self.n * conduit_size
  
-        return melt_opening - closure
+        return {
+            'gradient': gradient,
+            'potential': potential,
+            'pressure': effective_pressure,
+            'melt_opening': melt_opening,
+            'closure': closure,
+            'rate_of_change': melt_opening - closure
+        }
 
     @jax.jit
     def update(self, dt: float):
