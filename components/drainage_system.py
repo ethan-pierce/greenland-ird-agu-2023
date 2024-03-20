@@ -118,9 +118,7 @@ class SubglacialDrainageSystem(eqx.Module):
             / (self.cavity_closure_coeff * pressure**self.n * self.cavity_spacing**2)
         )
 
-        return jnp.where(
-            thickness < 0.0, 0.0, thickness
-        )
+        return thickness
 
     def _potential_residual(self, potential: jnp.array) -> jnp.array:
         """Calculate the residual of the potential field."""
@@ -137,36 +135,42 @@ class SubglacialDrainageSystem(eqx.Module):
 
         flux = (
             -self.sheet_conductivity 
-            * h**self.sheet_flow_exp
+            * jnp.maximum(h, 0.0)**self.sheet_flow_exp
             * jnp.abs(gradient)**(-1/2)
             * gradient
         )
         flux = jnp.where(
             (self.inflow_outflow[self.grid.node_at_link_head] == 1)
-            | (self.inflow_outflow[self.grid.node_at_link_tail] == 1),
+            & (self.inflow_outflow[self.grid.node_at_link_tail] == 1),
             0.0,
             flux
         )
 
-        forcing = self.discharge
+        div = self.grid.calc_flux_div_at_node(flux)
 
-        return jnp.abs(flux - forcing)
+        forcing = self.specific_melt_rate
+
+        return forcing - div
 
     def _solve_for_potential(self) -> jnp.array:
         """Solve for the hydraulic potential in the distributed system."""
         residual = lambda phi, args: self._potential_residual(phi)
-        solver = optx.LevenbergMarquardt(
-            rtol = 1e-6, atol = 1e-6,
-            linear_solver = lx.QR(),
+
+        solver = optx.Chord(
+            rtol = 1e-6, atol = 1e-8,
             norm = optx.two_norm,
-            verbose = frozenset({'step', 'loss', 'step_size'})
+            linear_solver = lx.SVD()
         )
 
-        solution = optx.least_squares(
+        solution = optx.root_find(
             residual,
             solver = solver,
             y0 = self.base_potential - self.state.overburden_pressure,
-            args = None
+            args = None,
+            options = {
+                'lower': self.base_potential - self.state.overburden_pressure + 1,
+                'upper': self.base_potential - 1
+            }
         )
 
         return solution.value

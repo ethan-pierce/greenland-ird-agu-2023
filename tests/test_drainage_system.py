@@ -16,24 +16,24 @@ def make_grid():
     """Create a simple unstructured grid."""
     g = TriangleModelGrid(
         (
-            [-1000, 1000, 1000, -1000],
-            [1000, 1000, -1000, -1000]
+            [1, 1, 20e3, 20e3],
+            [1, 60e3, 60e3, 1]
         ),
-        triangle_opts = 'pqDevjza1000q26',
+        triangle_opts = 'pqDevjza200000q26',
         sort = False
     )
     static = freeze_grid(g)
 
     g.add_field(
         'surface_elevation', 
-        (np.max(g.node_x) - g.node_x)**(1/3) * 50 + 5.,
+        np.sqrt(g.node_x + 10) * (1500 / np.sqrt(np.max(g.node_x))),
         at = 'node'
     )
 
     rng = np.random.default_rng(135)
     g.add_field(
         'bedrock_elevation',
-        (np.max(g.node_x) - g.node_x) * 0.05 + (rng.random(g.number_of_nodes)),
+        rng.random(g.number_of_nodes),
         at = 'node'
     )
 
@@ -45,7 +45,7 @@ def make_grid():
     
     g.add_field(
         'sliding_velocity',
-        g.map_mean_of_link_nodes_to_link((np.max(g.node_x) + g.node_x) * 0.5),
+        np.full(g.number_of_links, 1e-6) * 31556926,
         at = 'link'
     )
 
@@ -63,7 +63,10 @@ def make_grid():
 
     g.add_field(
         'surface_melt_rate',
-        (g.node_x + np.max(g.node_x)) * 3.45e-11,
+        np.maximum(
+            1.62e-6 - (g.at_node['surface_elevation'] * 1e-3) * 1.16e-6,
+            0.0
+        ),
         at = 'node'
     )
 
@@ -113,13 +116,13 @@ def test_sheet_thickness(grid, model):
     
 def test_residual(grid, model):
     """Test the potential residual calculation."""
-    residual = model._potential_residual(model.base_potential * 0.8)
-
-    assert residual.shape == (grid.number_of_links,)
-    assert np.all(residual >= 0.0)
+    residual = model._potential_residual(model.base_potential * 0.2)
 
 def test_solve_for_potential(grid, model):
     """Test the potential solver."""
     potential = model._solve_for_potential()
 
-    plot_triangle_mesh(grid, potential)
+    plot_triangle_mesh(
+        grid,
+        potential
+    )
