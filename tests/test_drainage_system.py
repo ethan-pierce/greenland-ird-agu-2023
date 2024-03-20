@@ -91,7 +91,7 @@ def model(state, grid):
     return SubglacialDrainageSystem(
         state,
         grid,
-        np.full(state.grid.number_of_nodes, 1e-3),
+        np.full(state.grid.number_of_nodes, 0.05),
         grid.at_node['surface_melt_rate']
     )
 
@@ -107,78 +107,29 @@ def test_route_flow(grid, model):
     assert model.flow_direction.shape == (grid.number_of_links,)
     assert np.all(np.isin(model.flow_direction, [-1, 1]))
 
+# Runs slowly
+# def test_solve_for_potential(grid, model):
+#     """Test the potential solver."""
+#     potential = model._solve_for_potential(jnp.full(grid.number_of_nodes, 0.05))
 
+#     assert potential.shape == (grid.number_of_nodes,)
 
-if __name__ == '__main__':
-    """Run a test case for an archetypal glacier margin."""
-    grid = make_grid()
-    state = ModelState(
-        freeze_grid(grid),
-        grid.at_node['ice_thickness'],
-        grid.at_node['surface_elevation'],
-        grid.at_link['sliding_velocity'],
-        grid.at_node['geothermal_heat_flux'],
-        grid.at_node['water_pressure']
-    )
-    model = SubglacialDrainageSystem(
-        state,
-        grid,
-        np.full(state.grid.number_of_links, 1e-3),
-        grid.at_node['surface_melt_rate']
-    )
-    initial_conduit_size = model.discharge / np.max(model.discharge) * 0.1 + 1e-3
-    model = eqx.tree_at(
-        lambda tree: tree.conduit_size,
-        model,
-        initial_conduit_size
+def test_sheet_growth_rate(grid, model):
+    """Test the sheet growth rate."""
+    dhdt = model._calc_sheet_growth_rate(
+        jnp.full(grid.number_of_nodes, 0.05),
+        model.state.overburden_pressure
     )
 
-    import jaxopt
-    
-    def residual(phi):
-        grad_phi = model.grid.calc_grad_at_link(phi)
+    assert dhdt.shape == (grid.number_of_nodes,)
 
-        pressure = jnp.maximum(
-            model.grid.map_mean_of_link_nodes_to_link(model.base_potential - phi), 
-            0.0
-        )
+def test_update_sheet_flow(grid, model):
+    """Test the sheet flow update."""
+    for i in range(2):
+        model = model._update_sheet_flow(60.0)
 
-        melt_opening = jnp.abs(model.opening_coeff * model.discharge * grad_phi * model.flow_direction)
-        gap_opening = jnp.abs(model.state.sliding_velocity / model.state.sec_per_a) * model.step_height
-        closure = model.closure_coeff * pressure**model.n * model.conduit_size
+    assert model.sheet_thickness.shape == (grid.number_of_nodes,)
 
-        conduit_size = (melt_opening + gap_opening) / (gap_opening / model.scale_cutoff + closure)
-
-        divergence = model.grid.calc_flux_div_at_node(
-            model.flow_coeff * conduit_size**model.flow_exp * jnp.sqrt(jnp.abs(grad_phi)) * model.flow_direction
-        )
-
-        residual = divergence - model.total_melt_rate
-
-        return jnp.sum(residual**2)
-
-    solver = jaxopt.ScipyBoundedMinimize(
-        fun = residual,
-        method = 'L-BFGS-B'
-    )
-    lower_bounds = model.state.water_density * model.state.gravity * model.state.bedrock_elevation
-    upper_bounds = model.base_potential
-    bounds = (lower_bounds, upper_bounds)
-    solution = solver.run(jnp.zeros(grid.number_of_nodes), bounds = bounds).params
-
-    gradient = model.grid.calc_grad_at_link(solution)
-    pressure = jnp.maximum(
-        model.grid.map_mean_of_link_nodes_to_link(model.base_potential - solution), 
-        0.0
-    )
-    melt_opening = jnp.abs(model.opening_coeff * model.discharge * gradient * model.flow_direction)
-    gap_opening = jnp.abs(model.state.sliding_velocity / model.state.sec_per_a) * model.step_height
-    closure = model.closure_coeff * pressure**model.n * model.conduit_size
-
-    conduit_size = (melt_opening + gap_opening) / (gap_opening / model.scale_cutoff + closure)
-
-    divergence = model.grid.calc_flux_div_at_node(
-        model.flow_coeff * conduit_size**model.flow_exp * jnp.sqrt(jnp.abs(gradient)) * model.flow_direction
-    )
-
-    residual = divergence - model.total_melt_rate
+    plot_triangle_mesh(grid, model.sheet_thickness)
+    plot_triangle_mesh(grid, model.potential)
+    plot_triangle_mesh(grid, model.base_potential - model.potential)

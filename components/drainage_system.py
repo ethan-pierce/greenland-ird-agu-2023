@@ -4,13 +4,16 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 import equinox as eqx
-import jaxopt
+import optimistix as optx
 
 from landlab import ModelGrid
 from landlab.components import FlowAccumulator, FlowDirectorMFD
 
 from utils import StaticGrid
 from components import ModelState
+
+from jax import config
+config.update("jax_enable_x64", True)
 
 class SubglacialDrainageSystem(eqx.Module):
     """Model subglacial conduit evolution, discharge, and pressure."""
@@ -19,22 +22,21 @@ class SubglacialDrainageSystem(eqx.Module):
     grid: StaticGrid = eqx.field(init = False)
     landlab_grid: ModelGrid = eqx.field(static = True)
     
-    conduit_size: jnp.array = eqx.field(converter = jnp.asarray)
+    sheet_thickness: jnp.array = eqx.field(converter = jnp.asarray)
     surface_melt_rate: jnp.array = eqx.field(converter = jnp.asarray)
     total_melt_rate: jnp.array = eqx.field(converter = jnp.asarray, init = False)
     base_potential: jnp.array = eqx.field(converter = jnp.asarray, init = False)
-    geometric_gradient: jnp.array = eqx.field(converter = jnp.asarray, init = False)
-    discharge: jnp.array = eqx.field(converter = jnp.asarray, init = False)
     flow_direction: jnp.array = eqx.field(converter = jnp.asarray, init = False)
     inflow_outflow: jnp.array = eqx.field(converter = jnp.asarray, init = False)
+    discharge: jnp.array = eqx.field(converter = jnp.asarray, init = False)
+    potential: jnp.array = eqx.field(converter = jnp.asarray, init = False)
 
-    opening_coeff: float = 1.3455e-9 # J^-1 m^3
-    closure_coeff: float = 7.11e-24 # Pa^-3 s^-1
-    flow_coeff: float = 4.05e-2 # m^9/4 Pa^-1/2 s^-1
-    flow_exp: float = 5 / 4
-    step_height: float = 0.03 # m
-    scale_cutoff: float = 5.74 # m^2
-    n: int = 3
+    sheet_conductivity: float = 1e-2 # m^7/4 kg^-1/2
+    sheet_flow_exp: float = 5/4
+    bedrock_step_height: float = 0.1 # m
+    cavity_spacing: float = 2.0 # m
+    cavity_closure_coeff: float = 5e-25 # Pa^-3 s^-1
+    n: int = 3 # Glen's flow law
 
     def __post_init__(self):
         """Initialize remaining model fields."""
@@ -47,22 +49,15 @@ class SubglacialDrainageSystem(eqx.Module):
             + self.surface_melt_rate
         ) * self.grid.cell_area_at_node
 
-        self._set_potential()
-        self._set_flow_direction()
-        self.discharge = self._route_flow(self.landlab_grid)
-
-    def _set_potential(self):
-        """Set the geometric components of the potential field."""
         self.base_potential = (
             self.state.water_density * self.state.gravity * self.state.bedrock_elevation
             + self.state.overburden_pressure
         )
 
-        self.geometric_gradient = (
-            -self.state.ice_density * self.state.gravity * self.state.surface_slope
-            -(self.state.water_density - self.state.ice_density) * self.state.gravity 
-            * self.state.bedrock_slope
-        )
+        self.potential = jnp.zeros(self.grid.number_of_nodes)
+
+        self._set_flow_direction()
+        self.discharge = self._route_flow(self.landlab_grid)
 
     def _set_flow_direction(self):
         """Set the flow direction and inflow/outflow at each node."""
@@ -91,7 +86,6 @@ class SubglacialDrainageSystem(eqx.Module):
             -1 * (self.grid.status_at_node > 0)
         )
 
-
     def _route_flow(self, landlab_grid) -> jnp.array:
         """Route discharge based on the hydraulic potential field."""
         fa = FlowAccumulator(
@@ -112,92 +106,91 @@ class SubglacialDrainageSystem(eqx.Module):
 
         return self.grid.map_mean_of_link_nodes_to_link(discharge)
 
-    def _calc_melt_opening(self, potential: jnp.array) -> jnp.array:
-        """Calculate the rate at which conduits are opening due to melt."""
-        gradient = self.grid.calc_grad_at_link(potential)
-        return jnp.abs(self.opening_coeff * self.discharge * gradient)
+    def _calc_forcing(self, sheet_thickness: jnp.array) -> jnp.array:
+        """Calculate the forcing term for the sheet evolution equation."""
+        sheet_on_links = self.grid.map_mean_of_link_nodes_to_link(sheet_thickness)
+        flux = (
+            self.flow_direction *
+            (
+                self.discharge 
+                / 
+                (self.sheet_conductivity * sheet_on_links**self.sheet_flow_exp)
+            )**2
+        )
 
-    def _calc_hydraulic_gradient(self, conduit_size: jnp.array) -> jnp.array:
-        """Calculate the hydraulic gradient through a conduit."""
-        gradient = (
-            (self.discharge / (self.flow_coeff * conduit_size**self.flow_exp))**2
-        ) * self.flow_direction
+        flux = jnp.where(
+            (self.inflow_outflow[self.grid.node_at_link_head] == 1) |
+            (self.inflow_outflow[self.grid.node_at_link_tail] == 1),
+            0.0,
+            flux
+        )
 
-        return gradient
-
-    def _matvec(self, potential: jnp.array) -> jnp.array:
-        """Calculate the residual for the potential field."""
+        return self.grid.calc_flux_div_at_node(flux)
+    
+    def _calc_laplacian(self, potential: jnp.array) -> jnp.array:
+        """Calculate the Laplacian of the potential, applying boundary conditions."""
         potential = jnp.where(
             self.inflow_outflow == -1,
-            self.state.water_density * self.state.gravity * self.state.bedrock_elevation,
+            self.base_potential - self.state.overburden_pressure,
             potential
         )
 
-        return self.grid.calc_flux_div_at_node(
-            self.grid.calc_grad_at_link(potential)
+        gradient = self.grid.calc_grad_at_link(potential)
+
+        return self.grid.calc_flux_div_at_node(gradient)
+
+    def _solve_for_potential(self, sheet_thickness: jnp.array) -> jnp.array:
+        """Solve for the potential of the sheet."""
+        forcing = self._calc_forcing(sheet_thickness)
+        residual = lambda phi, args: forcing + self._calc_laplacian(phi)
+        solver = optx.LevenbergMarquardt(
+            rtol = 1e-5, atol = 1e-3,
+            verbose = frozenset({'step', 'loss', 'step_size'})
         )
 
-    def _solve_for_potential(self, gradient: jnp.array) -> jnp.array:
-        """Solve for the hydraulic potential field."""
-        solution = jaxopt.linear_solve.solve_bicgstab(
-            matvec = self._matvec,
-            b = self.grid.calc_flux_div_at_node(gradient),
-            atol = 1e-3
+        solution = optx.least_squares(
+            residual,
+            solver = solver,
+            y0 = self.base_potential - self.state.overburden_pressure,
+            args = None
         )
+        return solution.value
 
-        return solution
-
-    def _calc_effective_pressure(self, potential: jnp.array) -> jnp.array:
-        """Calculate the effective pressure."""
-        water_pressure = (
-            potential -
-            self.state.water_density * self.state.gravity * self.state.bedrock_elevation
+    def _calc_sheet_growth_rate(self, sheet_thickness: jnp.array, potential: jnp.array) -> jnp.array:
+        """Calculate the growth rate of the sheet."""
+        step_differential = jnp.where(
+            sheet_thickness < self.bedrock_step_height,
+            (self.bedrock_step_height - sheet_thickness) / self.cavity_spacing,
+            0.0
         )
+        sliding_at_nodes = self.grid.map_mean_of_links_to_node(self.state.sliding_velocity)
+        opening = jnp.abs(sliding_at_nodes) / self.state.sec_per_a * step_differential
 
-        water_pressure = jnp.minimum(
-            jnp.maximum(
-                water_pressure,
-                0.0
-            ),
-            self.state.overburden_pressure
-        )
+        pressure = (self.base_potential - potential)**self.n
+        closure = self.cavity_closure_coeff * pressure * sheet_thickness
 
-        return self.state.overburden_pressure - water_pressure
+        return opening - closure
 
     @jax.jit
-    def _calc_conduit_roc(self, conduit_size: jnp.array) -> jnp.array:
-        """Calculate the rate at which conduits are expanding or contracting."""
-        gradient = self._calc_hydraulic_gradient(conduit_size)
-        potential = self._solve_for_potential(gradient)
-        effective_pressure = self.grid.map_mean_of_link_nodes_to_link(
-            self._calc_effective_pressure(potential)
-        )
-        effective_pressure = jnp.where(
-            effective_pressure < 1.0, 1.0, effective_pressure
+    def _update_sheet_flow(self, dt: float):
+        """Update the distributed components of the drainage system."""
+        potential = self._solve_for_potential(self.sheet_thickness)
+        
+        k1 = self._calc_sheet_growth_rate(self.sheet_thickness, potential)
+        k2 = self._calc_sheet_growth_rate(self.sheet_thickness + 0.5 * dt * k1, potential)
+        k3 = self._calc_sheet_growth_rate(self.sheet_thickness + 0.5 * dt * k2, potential)
+        k4 = self._calc_sheet_growth_rate(self.sheet_thickness + dt * k3, potential)
+
+        new_sheet_thickness = self.sheet_thickness + dt * (k1 + 2 * k2 + 2 * k3 + k4) / 6
+
+        new_sheet_thickness = jnp.where(
+            new_sheet_thickness < 0.0,
+            0.0,
+            new_sheet_thickness
         )
 
-        melt_opening = self.opening_coeff * self.discharge * gradient * self.flow_direction
-        closure = self.closure_coeff * effective_pressure**self.n * conduit_size
- 
-        return {
-            'gradient': gradient,
-            'potential': potential,
-            'pressure': effective_pressure,
-            'melt_opening': melt_opening,
-            'closure': closure,
-            'rate_of_change': melt_opening - closure
-        }
-
-    @jax.jit
-    def update(self, dt: float):
-        """Advance the model by dt seconds."""
-        updated_conduit_size = jnp.maximum(
-            self.conduit_size + self._calc_conduit_roc(self.conduit_size) * dt,
-            1e-3
-        )
+        updated = eqx.tree_at(lambda tree: tree.potential, self, potential)
 
         return eqx.tree_at(
-            lambda tree: tree.conduit_size,
-            self,
-            updated_conduit_size
+            lambda tree: tree.sheet_thickness, updated, new_sheet_thickness
         )

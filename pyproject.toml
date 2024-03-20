@@ -24,6 +24,8 @@ seaborn = "^0.13.0"
 symfit = "^0.5.6"
 jaxopt = "^0.8.3"
 lineax = "^0.0.4"
+optimistix = "^0.0.6"
+ruff = "^0.3.3"
 
 [build-system]
 requires = ["poetry-core"]
