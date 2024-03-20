@@ -63,9 +63,9 @@ def make_grid():
 
     g.add_field(
         'surface_melt_rate',
-        np.full(g.number_of_nodes, 3.45e-8),
+        (g.node_x + np.max(g.node_x)) * 3.45e-11,
         at = 'node'
-    ) # in m/s, corresponds to 0.25 cm/day
+    )
 
     return g
 
@@ -89,10 +89,7 @@ def state(grid):
 def model(state, grid):
     """Create an instance of the SubglacialDrainageSystem model."""
     return SubglacialDrainageSystem(
-        state,
-        grid,
-        np.full(state.grid.number_of_nodes, 0.05),
-        grid.at_node['surface_melt_rate']
+        state, grid, grid.at_node['surface_melt_rate']
     )
 
 def test_set_potential(grid, model):
@@ -107,29 +104,22 @@ def test_route_flow(grid, model):
     assert model.flow_direction.shape == (grid.number_of_links,)
     assert np.all(np.isin(model.flow_direction, [-1, 1]))
 
-# Runs slowly
-# def test_solve_for_potential(grid, model):
-#     """Test the potential solver."""
-#     potential = model._solve_for_potential(jnp.full(grid.number_of_nodes, 0.05))
+def test_sheet_thickness(grid, model):
+    """Test the sheet thickness calculation."""
+    h = model._calc_sheet_thickness(model.base_potential * 0.8)
 
-#     assert potential.shape == (grid.number_of_nodes,)
+    assert h.shape == (grid.number_of_nodes,)
+    assert np.all(h >= 0.0)
+    
+def test_residual(grid, model):
+    """Test the potential residual calculation."""
+    residual = model._potential_residual(model.base_potential * 0.8)
 
-def test_sheet_growth_rate(grid, model):
-    """Test the sheet growth rate."""
-    dhdt = model._calc_sheet_growth_rate(
-        jnp.full(grid.number_of_nodes, 0.05),
-        model.state.overburden_pressure
-    )
+    assert residual.shape == (grid.number_of_links,)
+    assert np.all(residual >= 0.0)
 
-    assert dhdt.shape == (grid.number_of_nodes,)
+def test_solve_for_potential(grid, model):
+    """Test the potential solver."""
+    potential = model._solve_for_potential()
 
-def test_update_sheet_flow(grid, model):
-    """Test the sheet flow update."""
-    for i in range(2):
-        model = model._update_sheet_flow(60.0)
-
-    assert model.sheet_thickness.shape == (grid.number_of_nodes,)
-
-    plot_triangle_mesh(grid, model.sheet_thickness)
-    plot_triangle_mesh(grid, model.potential)
-    plot_triangle_mesh(grid, model.base_potential - model.potential)
+    plot_triangle_mesh(grid, potential)
