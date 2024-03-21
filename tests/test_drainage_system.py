@@ -107,22 +107,15 @@ def test_route_flow(grid, model):
     assert model.flow_direction.shape == (grid.number_of_links,)
     assert np.all(np.isin(model.flow_direction, [-1, 1]))
 
-def test_sheet_thickness(grid, model):
-    """Test the sheet thickness calculation."""
-    h = model._calc_sheet_thickness(model.base_potential * 0.8)
-
-    assert h.shape == (grid.number_of_nodes,)
-    assert np.all(h >= 0.0)
-    
-def test_residual(grid, model):
-    """Test the potential residual calculation."""
-    residual = model._potential_residual(model.base_potential * 0.2)
-
 def test_solve_for_potential(grid, model):
-    """Test the potential solver."""
-    potential = model._solve_for_potential()
+    """Test the potential solution."""
+    phi = model._solve_for_potential(
+        np.full(grid.number_of_nodes, 1e-7),
+        model.base_potential
+    )
 
     plot_triangle_mesh(
         grid,
-        potential
+        phi,
+        subplots_args={'figsize': (18, 4)}
     )

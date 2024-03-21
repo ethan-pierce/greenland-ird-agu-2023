@@ -57,7 +57,7 @@ class SubglacialDrainageSystem(eqx.Module):
         self.potential = jnp.zeros(self.grid.number_of_nodes)
 
         self._set_flow_direction()
-        self.discharge = self._route_flow(self.landlab_grid)
+        self.discharge = self._route_flow(self.landlab_grid, self.base_potential)
 
     def _set_flow_direction(self):
         """Set the flow direction and inflow/outflow at each node."""
@@ -86,11 +86,11 @@ class SubglacialDrainageSystem(eqx.Module):
             -1 * (self.grid.status_at_node > 0)
         )
 
-    def _route_flow(self, landlab_grid) -> jnp.array:
+    def _route_flow(self, landlab_grid, potential: jnp.array) -> jnp.array:
         """Route discharge based on the hydraulic potential field."""
         fa = FlowAccumulator(
             landlab_grid, 
-            surface = self.base_potential,
+            surface = potential,
             runoff_rate = self.specific_melt_rate,
             flow_director = 'FlowDirectorMFD'
         )
@@ -105,164 +105,39 @@ class SubglacialDrainageSystem(eqx.Module):
 
         return self.grid.map_mean_of_link_nodes_to_link(discharge)
 
-    def _calc_sheet_thickness(self, potential: jnp.array) -> jnp.array:
-        """Calculate the mean thickness of flow across the distributed system."""
-        sliding = (
-            jnp.abs(self.grid.map_mean_of_links_to_node(self.state.sliding_velocity))
-            / self.state.sec_per_a
-        )
-        pressure = self.base_potential - potential
+    def _assemble_elliptic_operator(self, sheet_thickness: jnp.array, previous_potential: jnp.array):
+        """Assemble the linear operator for the elliptic equation in potential."""
+        L = np.zeros((self.grid.number_of_nodes, self.grid.number_of_nodes))
 
-        thickness = (
-            (sliding**2 * self.bedrock_step_height) 
-            / (self.cavity_closure_coeff * pressure**self.n * self.cavity_spacing**2)
-        )
+        for i in range(self.grid.number_of_nodes):
+            for j in self.grid.adjacent_nodes_at_node[i]:
+                if j != -1:
+                    links = np.intersect1d(self.grid.links_at_node[i], self.grid.links_at_node[j])
+                    link = int(links[links != -1][0])
+                    length = self.grid.length_of_face[self.grid.face_at_link[link]]
+                    if length > 0:
+                        if self.inflow_outflow[i] == 1:
+                            L[i, i] = 1
+                        else:
+                            root = np.power(
+                                np.abs(previous_potential[i] -  previous_potential[j]) / length,
+                                -1/2
+                            )
+                            hf = 0.5 * (sheet_thickness[i] + sheet_thickness[j])
+                            L[i, j] += -0.01 * hf**(5/4) * length * root
+                            L[i, i] -= -0.01 * hf**(5/4) * length * root
 
-        return thickness
+        return jnp.asarray(L)
 
-    def _potential_residual(self, potential: jnp.array) -> jnp.array:
-        """Calculate the residual of the potential field."""
-        potential = jnp.where(
-            self.inflow_outflow == -1,
+    def _solve_for_potential(self, sheet_thickness: jnp.array, previous_potential: jnp.array):
+        """Solve the elliptic equation for potential."""
+        matrix = self._assemble_elliptic_operator(sheet_thickness, previous_potential)
+        operator = lx.MatrixLinearOperator(matrix)
+        forcing = jnp.where(
+            self.inflow_outflow == 1,
             self.base_potential - self.state.overburden_pressure,
-            potential
+            self.specific_melt_rate
         )
-        h = self.grid.map_mean_of_link_nodes_to_link(
-            self._calc_sheet_thickness(potential)
-        )
-
-        gradient = self.grid.calc_grad_at_link(potential)
-
-        flux = (
-            -self.sheet_conductivity 
-            * jnp.maximum(h, 0.0)**self.sheet_flow_exp
-            * jnp.abs(gradient)**(-1/2)
-            * gradient
-        )
-        flux = jnp.where(
-            (self.inflow_outflow[self.grid.node_at_link_head] == 1)
-            & (self.inflow_outflow[self.grid.node_at_link_tail] == 1),
-            0.0,
-            flux
-        )
-
-        div = self.grid.calc_flux_div_at_node(flux)
-
-        forcing = self.specific_melt_rate
-
-        return forcing - div
-
-    def _solve_for_potential(self) -> jnp.array:
-        """Solve for the hydraulic potential in the distributed system."""
-        residual = lambda phi, args: self._potential_residual(phi)
-
-        solver = optx.Chord(
-            rtol = 1e-6, atol = 1e-8,
-            norm = optx.two_norm,
-            linear_solver = lx.SVD()
-        )
-
-        solution = optx.root_find(
-            residual,
-            solver = solver,
-            y0 = self.base_potential - self.state.overburden_pressure,
-            args = None,
-            options = {
-                'lower': self.base_potential - self.state.overburden_pressure + 1,
-                'upper': self.base_potential - 1
-            }
-        )
+        solution = lx.linear_solve(operator, forcing)
 
         return solution.value
-
-
-
-
-    # def _calc_forcing(self, sheet_thickness: jnp.array) -> jnp.array:
-    #     """Calculate the forcing term for the sheet evolution equation."""
-    #     sheet_on_links = self.grid.map_mean_of_link_nodes_to_link(sheet_thickness)
-    #     flux = (
-    #         self.flow_direction *
-    #         (
-    #             self.discharge 
-    #             / 
-    #             (self.sheet_conductivity * sheet_on_links**self.sheet_flow_exp)
-    #         )**2
-    #     )
-
-    #     flux = jnp.where(
-    #         (self.inflow_outflow[self.grid.node_at_link_head] == 1) |
-    #         (self.inflow_outflow[self.grid.node_at_link_tail] == 1),
-    #         0.0,
-    #         flux
-    #     )
-
-    #     return self.grid.calc_flux_div_at_node(flux)
-    
-    # def _calc_laplacian(self, potential: jnp.array) -> jnp.array:
-    #     """Calculate the Laplacian of the potential, applying boundary conditions."""
-    #     potential = jnp.where(
-    #         self.inflow_outflow == -1,
-    #         self.base_potential - self.state.overburden_pressure,
-    #         potential
-    #     )
-
-    #     gradient = self.grid.calc_grad_at_link(potential)
-
-    #     return self.grid.calc_flux_div_at_node(gradient)
-
-    # def _solve_for_potential(self, sheet_thickness: jnp.array) -> jnp.array:
-    #     """Solve for the potential of the sheet."""
-    #     forcing = self._calc_forcing(sheet_thickness)
-    #     residual = lambda phi, args: forcing + self._calc_laplacian(phi)
-    #     solver = optx.LevenbergMarquardt(
-    #         rtol = 1e-5, atol = 1e-3,
-    #         verbose = frozenset({'step', 'loss', 'step_size'})
-    #     )
-
-    #     solution = optx.least_squares(
-    #         residual,
-    #         solver = solver,
-    #         y0 = self.base_potential - self.state.overburden_pressure,
-    #         args = None
-    #     )
-    #     return solution.value
-
-    # def _calc_sheet_growth_rate(self, sheet_thickness: jnp.array, potential: jnp.array) -> jnp.array:
-    #     """Calculate the growth rate of the sheet."""
-    #     step_differential = jnp.where(
-    #         sheet_thickness < self.bedrock_step_height,
-    #         (self.bedrock_step_height - sheet_thickness) / self.cavity_spacing,
-    #         0.0
-    #     )
-    #     sliding_at_nodes = self.grid.map_mean_of_links_to_node(self.state.sliding_velocity)
-    #     opening = jnp.abs(sliding_at_nodes) / self.state.sec_per_a * step_differential
-
-    #     pressure = (self.base_potential - potential)**self.n
-    #     closure = self.cavity_closure_coeff * pressure * sheet_thickness
-
-    #     return opening - closure
-
-    # @jax.jit
-    # def _update_sheet_flow(self, dt: float):
-    #     """Update the distributed components of the drainage system."""
-    #     potential = self._solve_for_potential(self.sheet_thickness)
-        
-    #     k1 = self._calc_sheet_growth_rate(self.sheet_thickness, potential)
-    #     k2 = self._calc_sheet_growth_rate(self.sheet_thickness + 0.5 * dt * k1, potential)
-    #     k3 = self._calc_sheet_growth_rate(self.sheet_thickness + 0.5 * dt * k2, potential)
-    #     k4 = self._calc_sheet_growth_rate(self.sheet_thickness + dt * k3, potential)
-
-    #     new_sheet_thickness = self.sheet_thickness + dt * (k1 + 2 * k2 + 2 * k3 + k4) / 6
-
-    #     new_sheet_thickness = jnp.where(
-    #         new_sheet_thickness < 0.0,
-    #         0.0,
-    #         new_sheet_thickness
-    #     )
-
-    #     updated = eqx.tree_at(lambda tree: tree.potential, self, potential)
-
-    #     return eqx.tree_at(
-    #         lambda tree: tree.sheet_thickness, updated, new_sheet_thickness
-    #     )
