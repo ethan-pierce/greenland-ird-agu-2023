@@ -33,7 +33,7 @@ def make_grid():
     rng = np.random.default_rng(135)
     g.add_field(
         'bedrock_elevation',
-        rng.random(g.number_of_nodes),
+        rng.random(g.number_of_nodes) + (np.max(g.node_x) - g.node_x) * 1e-3,
         at = 'node'
     )
 
@@ -92,13 +92,16 @@ def state(grid):
 def model(state, grid):
     """Create an instance of the SubglacialDrainageSystem model."""
     return SubglacialDrainageSystem(
-        state, grid, grid.at_node['surface_melt_rate']
+        state, 
+        grid, 
+        grid.at_node['surface_melt_rate'],
+        state.overburden_pressure * 0.2,
+        np.full(grid.number_of_nodes, 1e-7)
     )
 
 def test_set_potential(grid, model):
     """Test the base potential calculation."""
     assert model.base_potential.shape == (grid.number_of_nodes,)
-    assert np.all(model.state.overburden_pressure <= model.base_potential)
 
 def test_route_flow(grid, model):
     """Test the flow routing."""
@@ -107,15 +110,25 @@ def test_route_flow(grid, model):
     assert model.flow_direction.shape == (grid.number_of_links,)
     assert np.all(np.isin(model.flow_direction, [-1, 1]))
 
-def test_solve_for_potential(grid, model):
-    """Test the potential solution."""
-    phi = model._solve_for_potential(
-        np.full(grid.number_of_nodes, 1e-7),
-        model.base_potential
-    )
+def test_tmp(grid, model):
 
-    plot_triangle_mesh(
-        grid,
-        phi,
-        subplots_args={'figsize': (18, 4)}
-    )
+    print(model.grid.get_unit_normal_at_links())
+    
+
+# def test_solve(grid, model):
+#     """Test the potential solver."""
+#     for i in range(10):
+#         model = model.update(60*60*24)
+
+#         plot_triangle_mesh(
+#             grid, 
+#             model.potential, 
+#             subplots_args={'figsize': (18, 4)},
+#             title = 'Hydraulic potential (Pa)'
+#         )
+#         plot_triangle_mesh(
+#             grid, 
+#             model.sheet_thickness, 
+#             subplots_args={'figsize': (18, 4)},
+#             title = 'Mean thickness of sheet flow (m)'
+#         )

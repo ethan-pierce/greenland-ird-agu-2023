@@ -21,12 +21,13 @@ class StaticGrid(eqx.Module):
     node_y: jax.Array = eqx.field(converter = jnp.asarray)
     x_of_corner: jax.Array = eqx.field(converter = jnp.asarray)
     y_of_corner: jax.Array = eqx.field(converter = jnp.asarray)
+    xy_of_patch: jax.Array = eqx.field(converter = jnp.asarray)
     length_of_link: jax.Array = eqx.field(converter = jnp.asarray)
+    midpoint_of_link: jax.Array = eqx.field(converter = jnp.asarray)
     angle_of_link: jax.Array = eqx.field(converter = jnp.asarray)
     length_of_face: jax.Array = eqx.field(converter = jnp.asarray)
     area_of_patch: jax.Array = eqx.field(converter = jnp.asarray)
     cell_area_at_node: jax.Array = eqx.field(converter = jnp.asarray)
-    adjacent_nodes_at_node: jax.Array = eqx.field(converter = jnp.asarray)
 
     # Boundary conditions
     core_nodes: jax.Array = eqx.field(converter = jnp.asarray)
@@ -35,6 +36,7 @@ class StaticGrid(eqx.Module):
     status_at_link: jax.Array = eqx.field(converter = jnp.asarray)
 
     # Connectivity
+    adjacent_nodes_at_node: jax.Array = eqx.field(converter = jnp.asarray)
     node_at_link_head: jax.Array = eqx.field(converter = jnp.asarray)
     node_at_link_tail: jax.Array = eqx.field(converter = jnp.asarray)
     links_at_node: jax.Array = eqx.field(converter = jnp.asarray)
@@ -45,6 +47,7 @@ class StaticGrid(eqx.Module):
     corners_at_face: jax.Array = eqx.field(converter = jnp.asarray)
     nodes_at_patch: jax.Array = eqx.field(converter = jnp.asarray)
     patches_at_node: jax.Array = eqx.field(converter = jnp.asarray)
+    patches_at_link: jax.Array = eqx.field(converter = jnp.asarray)
 
     def map_mean_of_links_to_node(self, array):
         """Map an array of values from links to nodes."""
@@ -177,6 +180,11 @@ class StaticGrid(eqx.Module):
             self.sum_at_nodes(face_flux) / self.cell_area_at_node,
             0.0
         )
+
+    def get_unit_normal_at_links(self):
+        """Calculate the unit normal vector to each link."""
+        pass
+
 
 def freeze_grid(grid) -> StaticGrid:
     """Convert an existing Landlab grid to a new StaticGrid"""
