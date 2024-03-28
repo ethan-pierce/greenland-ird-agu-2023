@@ -31,6 +31,8 @@ class SubglacialDrainageSystem(eqx.Module):
     discharge: jnp.array = eqx.field(converter = jnp.asarray, init = False)
     potential: jnp.array = eqx.field(converter = jnp.asarray)
     sheet_thickness: jnp.array = eqx.field(converter = jnp.asarray)
+    channel_potential: jnp.array = eqx.field(converter = jnp.asarray)
+    channel_size: jnp.array = eqx.field(converter = jnp.asarray)
 
     sheet_conductivity: float = 1e-2 # m^7/4 kg^-1/2
     sheet_flow_exp: float = 5/4
@@ -162,10 +164,33 @@ class SubglacialDrainageSystem(eqx.Module):
 
         return solution.value
 
-    def update(self, dt: float):
-        """Advance the model by one step of dt seconds."""
+    def update_sheet_flow(self, dt: float):
+        """Advance the model by one step in the distributed system."""
         potential = self._solve_for_potential(self.sheet_thickness, self.potential)
         sheet_thickness = self._update_sheet_thickness(dt, self.sheet_thickness, potential)
 
         updated = eqx.tree_at(lambda t: t.potential, self, potential)
         return eqx.tree_at(lambda t: t.sheet_thickness, updated, sheet_thickness)
+
+    def _calc_exchange(self, sheet_thickness: jnp.array, potential_at_nodes: jnp.array) -> jnp.array:
+        """Calculate the exchange of water between sheets and channels."""
+        flow_over_patch = self.grid.map_mean_of_patch_nodes_to_patch(
+            -self.sheet_conductivity * sheet_thickness**self.sheet_flow_exp
+        )
+        _, comps = self.grid.calc_grad_at_patch(potential_at_nodes)
+        grad_at_patches = jnp.asarray([comps[0], comps[1]]).T * flow_over_patch[:, None]
+        normal_at_links = self.grid.get_normal_at_links()
+
+        def q_dot_n(link):
+            a = jnp.dot(
+                grad_at_patches[self.grid.patches_at_link][link, 0],
+                normal_at_links[link, 0]
+            )
+            b = jnp.dot(
+                grad_at_patches[self.grid.patches_at_link][link, 1],
+                normal_at_links[link, 1]
+            )
+            return jnp.nansum(jnp.asarray([a, b]))
+
+        return jax.vmap(q_dot_n)(jnp.arange(self.grid.number_of_links))
+

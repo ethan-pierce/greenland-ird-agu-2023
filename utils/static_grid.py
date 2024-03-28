@@ -79,6 +79,10 @@ class StaticGrid(eqx.Module):
             ctrl_tails > ctrl_heads, val_tails, val_heads
         )
 
+    def map_mean_of_patch_nodes_to_patch(self, array):
+        """Map an array of values from nodes to patches."""
+        return jnp.mean(array[self.nodes_at_patch], axis = 1)
+
     def sum_at_nodes(self, array):
         """At each node, sum incoming and outgoing values of an array defined on links."""
         return jnp.sum(self.link_dirs_at_node * array[self.links_at_node], axis = 1)
@@ -181,9 +185,30 @@ class StaticGrid(eqx.Module):
             0.0
         )
 
-    def get_unit_normal_at_links(self):
-        """Calculate the unit normal vector to each link."""
-        pass
+    def get_normal_at_links(self):
+        """Calculate the normal vector to each link."""
+        def at_one_link(l):
+            left = self.xy_of_patch[self.patches_at_link[l][0]]
+            right = jnp.where(
+                self.patches_at_link[l][1] != -1,
+                self.xy_of_patch[self.patches_at_link[l][1]],
+                jnp.asarray([jnp.nan, jnp.nan])
+            )
+
+            mid = self.midpoint_of_link[l]
+
+            left_normal = jnp.asarray(
+                [left[0] - mid[0], left[1] - mid[1]]
+            )
+
+            right_normal = jnp.asarray(
+                [right[0] - mid[0], right[1] - mid[1]]
+            )
+            
+            return jnp.asarray([left_normal, right_normal])
+            
+        normals = jax.vmap(at_one_link)(jnp.arange(self.number_of_links))
+        return normals
 
 
 def freeze_grid(grid) -> StaticGrid:

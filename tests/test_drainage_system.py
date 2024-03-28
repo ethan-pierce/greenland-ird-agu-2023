@@ -96,7 +96,9 @@ def model(state, grid):
         grid, 
         grid.at_node['surface_melt_rate'],
         state.overburden_pressure * 0.2,
-        np.full(grid.number_of_nodes, 1e-7)
+        np.full(grid.number_of_nodes, 1e-7),
+        state.overburden_pressure * 0.2,
+        np.full(grid.number_of_nodes, 1e-6)
     )
 
 def test_set_potential(grid, model):
@@ -112,23 +114,14 @@ def test_route_flow(grid, model):
 
 def test_tmp(grid, model):
 
-    print(model.grid.get_unit_normal_at_links())
-    
 
-# def test_solve(grid, model):
-#     """Test the potential solver."""
-#     for i in range(10):
-#         model = model.update(60*60*24)
 
-#         plot_triangle_mesh(
-#             grid, 
-#             model.potential, 
-#             subplots_args={'figsize': (18, 4)},
-#             title = 'Hydraulic potential (Pa)'
-#         )
-#         plot_triangle_mesh(
-#             grid, 
-#             model.sheet_thickness, 
-#             subplots_args={'figsize': (18, 4)},
-#             title = 'Mean thickness of sheet flow (m)'
-#         )
+    plot_links(
+        grid,
+        model.grid.map_mean_of_link_nodes_to_link(
+            model.grid.calc_flux_div_at_node(
+                model.discharge
+            )
+        ),
+        subplots_args={'figsize': (18, 4)}
+    )
