@@ -9,12 +9,12 @@ class StaticGrid(eqx.Module):
     """Handles grid elements, connectivity, and computes gradients."""
 
     # Basic information
-    number_of_nodes: int
-    number_of_corners: int
-    number_of_links: int
-    number_of_faces: int
-    number_of_patches: int
-    number_of_cells: int
+    number_of_nodes: int = eqx.field(converter = int, static = True)
+    number_of_corners: int = eqx.field(converter = int, static = True)
+    number_of_links: int = eqx.field(converter = int, static = True)
+    number_of_faces: int = eqx.field(converter = int, static = True)
+    number_of_patches: int = eqx.field(converter = int, static = True)
+    number_of_cells: int = eqx.field(converter = int, static = True)
 
     # Geometry
     node_x: jax.Array = eqx.field(converter = jnp.asarray)
@@ -115,7 +115,7 @@ class StaticGrid(eqx.Module):
         normal_hat = jnp.cross(vector_PQ, vector_PR)
         normal_mag = jnp.sqrt(jnp.square(normal_hat).sum(axis = 1))
 
-        return normal_hat / normal_mag.reshape(self.number_of_patches, 1)
+        return jnp.divide(normal_hat, normal_mag[:, None])
 
     def calc_grad_at_patch(self, array):
         """Calculate the gradient of an array at patches."""

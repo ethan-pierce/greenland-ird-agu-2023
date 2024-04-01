@@ -5,6 +5,7 @@ from numpy.testing import *
 import jax
 import jax.numpy as jnp
 import equinox as eqx
+import optimistix as optx
 import pytest
 
 from landlab import TriangleModelGrid
@@ -113,15 +114,14 @@ def test_route_flow(grid, model):
     assert np.all(np.isin(model.flow_direction, [-1, 1]))
 
 def test_tmp(grid, model):
+    phi0 = model.base_potential
+    S0 = jnp.full(grid.number_of_links, 1e-3)
+    h0 = jnp.full(grid.number_of_nodes, 0.05)
 
+    potential = model.solve_for_potential(phi0, S0, h0)
 
-
-    plot_links(
+    plot_triangle_mesh(
         grid,
-        model.grid.map_mean_of_link_nodes_to_link(
-            model.grid.calc_flux_div_at_node(
-                model.discharge
-            )
-        ),
-        subplots_args={'figsize': (18, 4)}
+        potential,
+        subplots_args = {'figsize': (18, 4)}
     )

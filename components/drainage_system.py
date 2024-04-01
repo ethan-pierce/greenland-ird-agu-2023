@@ -35,10 +35,13 @@ class SubglacialDrainageSystem(eqx.Module):
     channel_size: jnp.array = eqx.field(converter = jnp.asarray)
 
     sheet_conductivity: float = 1e-2 # m^7/4 kg^-1/2
-    sheet_flow_exp: float = 5/4
+    flow_exp: float = 5/4
+    channel_conductivity: float = 0.1 # m^3/2 kg^-1/2
     bedrock_step_height: float = 0.1 # m
     cavity_spacing: float = 2.0 # m
     cavity_closure_coeff: float = 5e-25 # Pa^-3 s^-1
+    pressure_melt_coeff: float = 7.5e-8 # K Pa^-1
+    heat_capacity: float = 4.22e3 # J kg^-1 K^-1
     n: int = 3 # Glen's flow law
 
     def __post_init__(self):
@@ -172,12 +175,12 @@ class SubglacialDrainageSystem(eqx.Module):
         updated = eqx.tree_at(lambda t: t.potential, self, potential)
         return eqx.tree_at(lambda t: t.sheet_thickness, updated, sheet_thickness)
 
-    def _calc_exchange(self, sheet_thickness: jnp.array, potential_at_nodes: jnp.array) -> jnp.array:
+    def _calc_exchange(self, potential: jnp.array, sheet_thickness: jnp.array) -> jnp.array:
         """Calculate the exchange of water between sheets and channels."""
         flow_over_patch = self.grid.map_mean_of_patch_nodes_to_patch(
-            -self.sheet_conductivity * sheet_thickness**self.sheet_flow_exp
+            -self.sheet_conductivity * sheet_thickness**self.flow_exp
         )
-        _, comps = self.grid.calc_grad_at_patch(potential_at_nodes)
+        _, comps = self.grid.calc_grad_at_patch(potential)
         grad_at_patches = jnp.asarray([comps[0], comps[1]]).T * flow_over_patch[:, None]
         normal_at_links = self.grid.get_normal_at_links()
 
@@ -193,4 +196,182 @@ class SubglacialDrainageSystem(eqx.Module):
             return jnp.nansum(jnp.asarray([a, b]))
 
         return jax.vmap(q_dot_n)(jnp.arange(self.grid.number_of_links))
+
+
+    def _assemble_full_operator(
+        self, 
+        previous_potential: jnp.array,
+        channel_size: jnp.array,
+        sheet_thickness: jnp.array
+    ):
+        """Assemble the linear operator for the elliptic equation in potential."""
+        previous_gradients = self.grid.calc_grad_at_link(previous_potential)
+        channel_discharge = (
+            -self.channel_conductivity * channel_size**self.flow_exp * previous_gradients
+        )
+        sheet_discharge = (
+            -self.sheet_conductivity 
+            * self.grid.map_mean_of_link_nodes_to_link(sheet_thickness)**self.flow_exp 
+            * jnp.abs(previous_gradients)**(-1/2)
+            * previous_gradients
+        )
+        dissipation_coeff = (
+            ((1 / self.state.ice_density) - (1 / self.state.water_density))
+            * (1 / self.state.ice_latent_heat)
+        )
+
+        matrix = np.zeros((self.grid.number_of_nodes, self.grid.number_of_nodes))
+
+        for i in range(self.grid.number_of_nodes):
+            if self.inflow_outflow[i] == 1:
+                matrix[i, i] = 1
+            else:
+                j = self.grid.adjacent_nodes_at_node[i][self.grid.adjacent_nodes_at_node[i] != -1]
+                all_links = np.intersect1d(self.grid.links_at_node[i], self.grid.links_at_node[j])
+                valid_links = all_links[all_links != -1]
+
+                face_lengths = self.grid.length_of_face[self.grid.face_at_link[valid_links]]
+                link_lengths = self.grid.length_of_link[valid_links]
+                
+                channel_size_on_links = 0.5 * (channel_size[i] + channel_size[j])
+                sheet_thickness_on_links = 0.5 * (sheet_thickness[i] + sheet_thickness[j])
+                
+                sheet_flux = (
+                    -self.sheet_conductivity 
+                    * sheet_thickness_on_links**self.flow_exp
+                    * jnp.abs(previous_gradients[valid_links])**(-1/2)
+                    * face_lengths
+                    / link_lengths
+                )
+
+                channel_flux = (
+                    -self.channel_conductivity
+                    * channel_size_on_links**self.flow_exp
+                    * face_lengths
+                    / link_lengths
+                )
+
+                channel_dissipation = (
+                    dissipation_coeff
+                    * channel_discharge[valid_links]
+                    * face_lengths
+                )
+
+                sheet_dissipation = (
+                    dissipation_coeff
+                    * sheet_discharge[valid_links]
+                    * self.cavity_spacing
+                    * face_lengths
+                )
+
+                matrix[i, j] += sheet_flux + channel_flux + channel_dissipation + sheet_dissipation
+                matrix[i, i] -= jnp.sum(
+                    sheet_flux + channel_flux + channel_dissipation + sheet_dissipation
+                )
+
+        return jnp.asarray(matrix)
+
+    def _calc_forcing(
+        self, 
+        previous_potential: jnp.array,
+        channel_size: jnp.array,
+        sheet_thickness: jnp.array
+    ):
+        """Calculate the forcing term for the elliptic equation in potential."""
+        previous_gradients = self.grid.calc_grad_at_link(previous_potential)
+
+        channel_source = jnp.sum(
+            self._calc_exchange(previous_potential, sheet_thickness)[self.grid.links_at_node],
+            axis = 1
+        )
+
+        channel_closure = (
+            self.cavity_closure_coeff 
+            * (self.base_potential - previous_potential)**self.n
+            * self.grid.map_mean_of_links_to_node(channel_size)
+        )
+
+        interior_forcing = -channel_closure - channel_source - self.specific_melt_rate
+
+        return jnp.where(
+            self.inflow_outflow == 1,
+            self.base_potential - self.state.overburden_pressure,
+            interior_forcing
+        )
+
+    def solve_for_potential(
+        self,
+        previous_potential: jnp.array,
+        channel_size: jnp.array,
+        sheet_thickness: jnp.array
+    ):
+        """Solve the elliptic equation for potential."""
+        matrix = self._assemble_full_operator(previous_potential, channel_size, sheet_thickness)
+        operator = lx.MatrixLinearOperator(matrix)
+        forcing = self._calc_forcing(previous_potential, channel_size, sheet_thickness)
+        solution = lx.linear_solve(operator, forcing)
+
+        return solution.value
+
+
+
+# THE FOLLOWING FUNCTIONS HANDLE THE PROBLEM IN A NON-LINEAR LEAST SQUARES FORM
+    # def _channel_residual(
+    #     self, 
+    #     potential: jnp.array, 
+    #     args: tuple
+    # ) -> jnp.array:
+    #     """Calculate the residual in the channelized system."""
+    #     channel_size, sheet_thickness = args
+    #     exchange = self._calc_exchange(sheet_thickness, potential)
+    #     pressure = self.grid.map_mean_of_link_nodes_to_link(
+    #         self.base_potential - potential
+    #     )
+    #     closure = self.cavity_closure_coeff * pressure**self.n * channel_size
+
+    #     gradient = self.grid.calc_grad_at_link(potential)
+
+    #     channel_discharge = (
+    #         -self.channel_conductivity * channel_size**self.flow_exp * gradient
+    #     )
+
+    #     sheet_contribution = (
+    #         -self.sheet_conductivity 
+    #         * self.cavity_spacing 
+    #         * self.grid.map_mean_of_link_nodes_to_link(sheet_thickness)**self.flow_exp
+    #         * gradient
+    #     )
+
+    #     dissipation = jnp.abs(channel_discharge * gradient) + jnp.abs(sheet_contribution * gradient)
+
+    #     density_coeff = (
+    #         ((1 / self.state.ice_density) - (1 / self.state.water_density)) 
+    #         * (1 / self.state.ice_latent_heat)
+    #     )
+
+    #     flux_div = self.grid.map_mean_of_link_nodes_to_link(
+    #         self.grid.calc_flux_div_at_node(channel_discharge)
+    #     )
+
+    #     return flux_div + dissipation * density_coeff - closure - exchange
+
+    # def _total_residual(
+    #     self, 
+    #     potential: jnp.array, 
+    #     args: tuple
+    # ) -> jnp.array:
+    #     """Calculate the total residual in the system."""
+    #     channel_size, sheet_thickness = args
+    #     channel_residual = self._channel_residual(potential, args)
+    #     channel_res_nodes = self.grid.map_mean_of_links_to_node(channel_residual)
+
+    #     gradient = self.grid.calc_grad_at_link(potential)
+    #     h_on_links = self.grid.map_mean_of_link_nodes_to_link(sheet_thickness)
+    #     sheet_discharge = (
+    #         -self.sheet_conductivity * h_on_links**self.flow_exp * gradient
+    #     )
+    #     flux_div = self.grid.calc_flux_div_at_node(sheet_discharge)
+    #     sheet_residual = flux_div - self.specific_melt_rate / self.cavity_spacing
+
+    #     return jnp.abs(channel_res_nodes) + jnp.abs(sheet_residual)
 
