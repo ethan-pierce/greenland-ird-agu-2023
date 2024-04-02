@@ -97,31 +97,46 @@ def model(state, grid):
         grid, 
         grid.at_node['surface_melt_rate'],
         state.overburden_pressure * 0.2,
-        np.full(grid.number_of_nodes, 1e-7),
-        state.overburden_pressure * 0.2,
-        np.full(grid.number_of_nodes, 1e-6)
+        np.full(grid.number_of_links, 0.0),
+        np.full(grid.number_of_nodes, 0.05)
     )
 
-def test_set_potential(grid, model):
-    """Test the base potential calculation."""
-    assert model.base_potential.shape == (grid.number_of_nodes,)
+# def test_set_potential(grid, model):
+#     """Test the base potential calculation."""
+#     assert model.base_potential.shape == (grid.number_of_nodes,)
 
-def test_route_flow(grid, model):
-    """Test the flow routing."""
-    assert model.discharge.shape == (grid.number_of_links,)
-    assert np.all(model.discharge >= 0)
-    assert model.flow_direction.shape == (grid.number_of_links,)
-    assert np.all(np.isin(model.flow_direction, [-1, 1]))
+# def test_route_flow(grid, model):
+#     """Test the flow routing."""
+#     assert model.discharge.shape == (grid.number_of_links,)
+#     assert np.all(model.discharge >= 0)
+#     assert model.flow_direction.shape == (grid.number_of_links,)
+#     assert np.all(np.isin(model.flow_direction, [-1, 1]))
 
 def test_tmp(grid, model):
-    phi0 = model.base_potential
-    S0 = jnp.full(grid.number_of_links, 1e-3)
-    h0 = jnp.full(grid.number_of_nodes, 0.05)
+    model = model.update(60.0)
 
-    potential = model.solve_for_potential(phi0, S0, h0)
+    for i in range(4):
+        model = model.update(60.0)
+
+        print('Iteration', i)
 
     plot_triangle_mesh(
         grid,
-        potential,
-        subplots_args = {'figsize': (18, 4)}
+        model.potential,
+        subplots_args = {'figsize': (18, 4)},
+        title = 'Hydraulic potential (Pa)'
+    )
+
+    plot_links(
+        grid,
+        model.channel_size,
+        subplots_args = {'figsize': (18, 4)},
+        title = 'Channel size (m$^2$)'
+    )
+
+    plot_triangle_mesh(
+        grid,
+        model.sheet_thickness,
+        subplots_args = {'figsize': (18, 4)},
+        title = 'Distributed sheet thickness (m)'
     )

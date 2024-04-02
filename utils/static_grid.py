@@ -3,6 +3,7 @@
 import dataclasses
 import jax
 import jax.numpy as jnp
+import numpy as np
 import equinox as eqx
 
 class StaticGrid(eqx.Module):
@@ -209,6 +210,21 @@ class StaticGrid(eqx.Module):
             
         normals = jax.vmap(at_one_link)(jnp.arange(self.number_of_links))
         return normals
+
+    def build_link_between_nodes_array(self):
+        """Construct an array of links connecting each pair of nodes."""
+        link_between_nodes = np.full((self.number_of_nodes, self.number_of_nodes), -1)
+
+        for i in range(self.number_of_nodes):
+            adj = self.adjacent_nodes_at_node[i]
+
+            for j in adj[adj != -1]:
+                link = np.intersect1d(self.links_at_node[i], self.links_at_node[j])
+                link = int(link[link != -1])
+
+                link_between_nodes[i, j] = link
+
+        return link_between_nodes
 
 
 def freeze_grid(grid) -> StaticGrid:
