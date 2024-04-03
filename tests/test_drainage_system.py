@@ -101,17 +101,6 @@ def model(state, grid):
         np.full(grid.number_of_nodes, 0.05)
     )
 
-# def test_set_potential(grid, model):
-#     """Test the base potential calculation."""
-#     assert model.base_potential.shape == (grid.number_of_nodes,)
-
-# def test_route_flow(grid, model):
-#     """Test the flow routing."""
-#     assert model.discharge.shape == (grid.number_of_links,)
-#     assert np.all(model.discharge >= 0)
-#     assert model.flow_direction.shape == (grid.number_of_links,)
-#     assert np.all(np.isin(model.flow_direction, [-1, 1]))
-
 def test_tmp(grid, model):
 
     model = model.update(60.0)
@@ -121,42 +110,43 @@ def test_tmp(grid, model):
     model = model.update(60.0)
     print('Iteration time:', time.time() - start)
 
-
-    potentials = []
-    channels = []
-    sheets = []
-
-    for i in range(24 * 100):
+    for i in range(5):
         model = model.update(60.0 * 60.0)
 
         print('Iteration', i)
 
-        potentials.append(model.potential)
-        channels.append(model.channel_size)
-        sheets.append(model.sheet_thickness)
+    plot_triangle_mesh(
+        grid,
+        model.base_potential - model.potential,
+        subplots_args = {'figsize': (18, 4)},
+        title = 'Effective pressure (Pa)'
+    )
 
-    np.savetxt('potentials.txt', np.array(potentials))
-    np.savetxt('channels.txt', np.array(channels))
-    np.savetxt('sheets.txt', np.array(sheets))
+    Qc = jnp.abs(
+        -model.channel_conductivity
+        * model.channel_size**model.flow_exp
+        * model.grid.calc_grad_at_link(model.potential)
+    )
+    plot_links(
+        grid,
+        Qc,
+        subplots_args = {'figsize': (18, 4)},
+        title = 'Channelized discharge (m$^3$ s$^{-1}$)'
+    )
 
-    # plot_triangle_mesh(
-    #     grid,
-    #     model.potential,
-    #     subplots_args = {'figsize': (18, 4)},
-    #     title = 'Hydraulic potential (Pa)'
-    # )
-
-    # plot_links(
-    #     grid,
-    #     model.channel_size,
-    #     subplots_args = {'figsize': (18, 4)},
-    #     title = 'Channel size (m$^2$)'
-    # )
-
-    # plot_triangle_mesh(
-    #     grid,
-    #     model.sheet_thickness,
-    #     subplots_args = {'figsize': (18, 4)},
-    #     title = 'Distributed sheet thickness (m)'
-    # )
+    gradient = model.grid.map_mean_of_links_to_node(
+        model.grid.calc_grad_at_link(model.potential)
+    )
+    Qs = jnp.abs(
+        -model.sheet_conductivity
+        * model.sheet_thickness**model.flow_exp
+        * jnp.power(jnp.abs(gradient), -1/2)
+        * gradient
+    )
+    plot_triangle_mesh(
+        grid,
+        Qs,
+        subplots_args = {'figsize': (18, 4)},
+        title = 'Distributed discharge (m$^3$ s$^{-1}$)'
+    )
 

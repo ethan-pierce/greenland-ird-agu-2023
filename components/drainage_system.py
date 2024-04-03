@@ -280,10 +280,15 @@ class SubglacialDrainageSystem(eqx.Module):
                 )
             ) * dissipation_coeff
 
-            return out.at[j].set(
-                -(sheet_flux + channel_flux + channel_dissipation + sheet_dissipation - sensible_heat)
-            ).at[i].add(
-                (sheet_flux + channel_flux + channel_dissipation + sheet_dissipation - sensible_heat)
+            return jax.lax.cond(
+                self.inflow_outflow[j] == 1,
+                lambda _: out,
+                lambda _: out.at[j].set(
+                    (sheet_flux + channel_flux + channel_dissipation + sheet_dissipation - sensible_heat)
+                ).at[i].add(
+                    -(sheet_flux + channel_flux + channel_dissipation + sheet_dissipation - sensible_heat)
+                ),
+                0
             )
 
         def assemble_interior(i):
@@ -388,10 +393,10 @@ class SubglacialDrainageSystem(eqx.Module):
         dSdt = lambda S: dt * (
             (
                 jnp.abs(
-                    self.channel_conductivity * S**self.flow_exp * self.grid.calc_grad_at_link(potential)
+                    -self.channel_conductivity * S**self.flow_exp * self.grid.calc_grad_at_link(potential)
                 )
                 + jnp.abs(
-                    self.sheet_conductivity 
+                    -self.sheet_conductivity 
                     * self.cavity_spacing
                     * self.grid.map_mean_of_link_nodes_to_link(sheet_thickness)**self.flow_exp 
                     * self.grid.calc_grad_at_link(potential)
@@ -405,7 +410,7 @@ class SubglacialDrainageSystem(eqx.Module):
                         + jnp.where(
                             (S > 0) | 
                             (S * self.grid.calc_grad_at_link(potential - grav_potential) > 0),
-                            self.cavity_spacing * self.sheet_conductivity * S**self.flow_exp * self.grid.calc_grad_at_link(potential),
+                            -self.cavity_spacing * self.sheet_conductivity * S**self.flow_exp * self.grid.calc_grad_at_link(potential),
                             0.0
                         )
                     )
@@ -419,7 +424,10 @@ class SubglacialDrainageSystem(eqx.Module):
 
         residual = lambda S, _: S - channel_size - dSdt(S)
 
-        solver = optx.Newton(rtol = 1e-5, atol = 1e-5)
+        solver = optx.Newton(
+            rtol = 1e-5, atol = 1e-5,
+            linear_solver = lx.AutoLinearSolver(well_posed = None)
+        )
         solution = optx.root_find(residual, solver, channel_size, args = None)
 
         channel_size = jnp.where(
