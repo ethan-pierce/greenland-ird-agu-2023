@@ -116,7 +116,8 @@ class SubglacialDrainageSystem(eqx.Module):
     def _calc_exchange(self, potential: jnp.array, sheet_thickness: jnp.array) -> jnp.array:
         """Calculate the exchange of water between sheets and channels."""
         flow_over_patch = self.grid.map_mean_of_patch_nodes_to_patch(
-            -self.sheet_conductivity * sheet_thickness**self.flow_exp
+            -self.sheet_conductivity 
+            * sheet_thickness**self.flow_exp 
         )
         _, comps = self.grid.calc_grad_at_patch(potential)
         grad_at_patches = jnp.asarray([comps[0], comps[1]]).T * flow_over_patch[:, None]
@@ -170,7 +171,7 @@ class SubglacialDrainageSystem(eqx.Module):
                 face_lengths = self.grid.length_of_face[self.grid.face_at_link[valid_links]]
                 link_lengths = self.grid.length_of_link[valid_links]
                 
-                channel_size_on_links = 0.5 * (channel_size[i] + channel_size[j])
+                channel_size_on_links = channel_size[valid_links]
                 sheet_thickness_on_links = 0.5 * (sheet_thickness[i] + sheet_thickness[j])
                 
                 sheet_flux = (
@@ -235,7 +236,7 @@ class SubglacialDrainageSystem(eqx.Module):
             link = self.links_between_nodes[i, j]
             face_length = self.grid.length_of_face[self.grid.face_at_link[link]]
             link_length = self.grid.length_of_link[link]
-            channel_size_on_link = 0.5 * (channel_size[i] + channel_size[j])
+            channel_size_on_link = channel_size[link]
             sheet_thickness_on_link = 0.5 * (sheet_thickness[i] + sheet_thickness[j])
 
             sheet_flux = (
@@ -266,10 +267,23 @@ class SubglacialDrainageSystem(eqx.Module):
                 * face_length
             )
 
+            sensible_heat = (
+                -self.heat_capacity * self.pressure_melt_coeff * self.state.water_density
+                * (
+                    channel_discharge[link] 
+                    + jnp.where(
+                        (channel_size[link] > 0) | 
+                        (sheet_discharge[link] * previous_gradients[link] > 0),
+                        self.cavity_spacing * sheet_discharge[link],
+                        0.0
+                    )
+                )
+            ) * dissipation_coeff
+
             return out.at[j].set(
-                -(sheet_flux + channel_flux + channel_dissipation + sheet_dissipation)
+                -(sheet_flux + channel_flux + channel_dissipation + sheet_dissipation - sensible_heat)
             ).at[i].add(
-                sheet_flux + channel_flux + channel_dissipation + sheet_dissipation
+                (sheet_flux + channel_flux + channel_dissipation + sheet_dissipation - sensible_heat)
             )
 
         def assemble_interior(i):
@@ -289,7 +303,7 @@ class SubglacialDrainageSystem(eqx.Module):
 
         def assemble_row(i):
             return jax.lax.cond(
-                self.inflow_outflow[i] == 1,
+                self.inflow_outflow[i] == -1,
                 assemble_boundary,
                 assemble_interior,
                 i
@@ -317,10 +331,32 @@ class SubglacialDrainageSystem(eqx.Module):
             * self.grid.map_mean_of_links_to_node(channel_size)
         )
 
-        interior_forcing = channel_closure + channel_source + self.specific_melt_rate
+        sheet_source = jnp.where(
+            sheet_thickness < self.bedrock_step_height,
+            self.grid.map_mean_of_links_to_node(
+                jnp.abs(self.state.sliding_velocity / self.state.sec_per_a)
+            )
+            * (self.bedrock_step_height - sheet_thickness) 
+            / self.cavity_spacing,
+            0.0
+        )
+
+        sheet_closure = (
+            self.closure_coeff
+            * sheet_thickness
+            * (self.base_potential - previous_potential)**self.n
+        )
+
+        interior_forcing = (
+            channel_closure 
+            + channel_source 
+            + self.specific_melt_rate
+            + sheet_closure
+            - sheet_source
+        )
 
         return jnp.where(
-            self.inflow_outflow == 1,
+            self.inflow_outflow == -1,
             self.base_potential - self.state.overburden_pressure,
             interior_forcing
         )
@@ -347,6 +383,8 @@ class SubglacialDrainageSystem(eqx.Module):
         potential: jnp.array
     ):
         """Update the cross-sectional area of channels on every link."""
+        grav_potential = self.state.water_density * self.state.gravity * self.state.bedrock_elevation
+
         dSdt = lambda S: dt * (
             (
                 jnp.abs(
@@ -357,6 +395,20 @@ class SubglacialDrainageSystem(eqx.Module):
                     * self.cavity_spacing
                     * self.grid.map_mean_of_link_nodes_to_link(sheet_thickness)**self.flow_exp 
                     * self.grid.calc_grad_at_link(potential)
+                )
+                - (
+                    -self.heat_capacity 
+                    * self.pressure_melt_coeff 
+                    * self.state.water_density
+                    * (
+                        -self.channel_conductivity * S**self.flow_exp * self.grid.calc_grad_at_link(potential)
+                        + jnp.where(
+                            (S > 0) | 
+                            (S * self.grid.calc_grad_at_link(potential - grav_potential) > 0),
+                            self.cavity_spacing * self.sheet_conductivity * S**self.flow_exp * self.grid.calc_grad_at_link(potential),
+                            0.0
+                        )
+                    )
                 )
             )
             / (self.state.ice_density * self.state.ice_latent_heat)
@@ -371,8 +423,8 @@ class SubglacialDrainageSystem(eqx.Module):
         solution = optx.root_find(residual, solver, channel_size, args = None)
 
         channel_size = jnp.where(
-            (self.inflow_outflow[self.grid.node_at_link_head] == -1) &
-            (self.inflow_outflow[self.grid.node_at_link_tail] == -1),
+            (self.inflow_outflow[self.grid.node_at_link_head] != 0) &
+            (self.inflow_outflow[self.grid.node_at_link_tail] != 0),
             0.0,
             solution.value
         )

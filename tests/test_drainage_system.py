@@ -20,7 +20,7 @@ def make_grid():
             [1, 1, 20e3, 20e3],
             [1, 60e3, 60e3, 1]
         ),
-        triangle_opts = 'pqDevjza200000q26',
+        triangle_opts = 'pqDevjza500000q26',
         sort = False
     )
     static = freeze_grid(g)
@@ -113,30 +113,50 @@ def model(state, grid):
 #     assert np.all(np.isin(model.flow_direction, [-1, 1]))
 
 def test_tmp(grid, model):
+
     model = model.update(60.0)
 
-    for i in range(4):
-        model = model.update(60.0)
+    import time
+    start = time.time()
+    model = model.update(60.0)
+    print('Iteration time:', time.time() - start)
+
+
+    potentials = []
+    channels = []
+    sheets = []
+
+    for i in range(24 * 100):
+        model = model.update(60.0 * 60.0)
 
         print('Iteration', i)
 
-    plot_triangle_mesh(
-        grid,
-        model.potential,
-        subplots_args = {'figsize': (18, 4)},
-        title = 'Hydraulic potential (Pa)'
-    )
+        potentials.append(model.potential)
+        channels.append(model.channel_size)
+        sheets.append(model.sheet_thickness)
 
-    plot_links(
-        grid,
-        model.channel_size,
-        subplots_args = {'figsize': (18, 4)},
-        title = 'Channel size (m$^2$)'
-    )
+    np.savetxt('potentials.txt', np.array(potentials))
+    np.savetxt('channels.txt', np.array(channels))
+    np.savetxt('sheets.txt', np.array(sheets))
 
-    plot_triangle_mesh(
-        grid,
-        model.sheet_thickness,
-        subplots_args = {'figsize': (18, 4)},
-        title = 'Distributed sheet thickness (m)'
-    )
+    # plot_triangle_mesh(
+    #     grid,
+    #     model.potential,
+    #     subplots_args = {'figsize': (18, 4)},
+    #     title = 'Hydraulic potential (Pa)'
+    # )
+
+    # plot_links(
+    #     grid,
+    #     model.channel_size,
+    #     subplots_args = {'figsize': (18, 4)},
+    #     title = 'Channel size (m$^2$)'
+    # )
+
+    # plot_triangle_mesh(
+    #     grid,
+    #     model.sheet_thickness,
+    #     subplots_args = {'figsize': (18, 4)},
+    #     title = 'Distributed sheet thickness (m)'
+    # )
+
