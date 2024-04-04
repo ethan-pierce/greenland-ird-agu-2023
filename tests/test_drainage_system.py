@@ -97,7 +97,7 @@ def model(state, grid):
         grid.at_node['surface_melt_rate'],
         grid.at_node['bedrock_elevation'] * 1000 * 9.81,
         np.full(grid.number_of_nodes, 0.05),
-        np.full(grid.number_of_links, 1e-3)
+        np.full(grid.number_of_links, 0.0)
     )
 
 def test_initialize(grid, model):
@@ -109,3 +109,26 @@ def test_initialize(grid, model):
     assert model.channel_size.shape == (grid.number_of_links,)
     assert model.links_between_nodes.shape == (grid.number_of_nodes, grid.number_of_nodes)
 
+def test_tmp(grid, model):
+    phi = model.solve_for_potential(
+        model.potential,
+        model.sheet_thickness,
+        model.channel_size
+    )
+
+    h = model.update_sheet_flow(
+        phi,
+        model.sheet_thickness,
+        1.0
+    )
+
+    plot_links(
+        grid,
+        (   
+            model.energy_dissipation(phi, h, model.channel_size)
+            - model.sensible_heat(phi, h, model.channel_size)
+        ) / (model.state.ice_density * model.state.ice_latent_heat)
+        - model.calc_channel_closure(phi, model.channel_size)
+    )
+
+    

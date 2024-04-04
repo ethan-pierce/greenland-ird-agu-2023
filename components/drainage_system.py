@@ -12,6 +12,7 @@ from components import ModelState
 from jax import config
 config.update("jax_enable_x64", True)
 
+
 class SubglacialDrainageSystem(eqx.Module):
     """Model subglacial conduit evolution, discharge, and pressure."""
 
@@ -103,26 +104,34 @@ class SubglacialDrainageSystem(eqx.Module):
         """Calculate the effective pressure from potential."""
         return self.overburden_potential - potential
 
-    def sheet_discharge_on_links(self, potential: jnp.array, sheet_thickness: jnp.array) -> jnp.array:
-        """Interpolate discharge from the distributed system onto grid links."""
+    def sheet_discharge_coeff(self, potential: jnp.array, sheet_thickness: jnp.array) -> jnp.array:
+        """Calculate the discharge coefficient for distributed sheet flow."""
         gradient = self.grid.calc_grad_at_link(potential)
         sheet_thickness_on_links = self.grid.map_mean_of_link_nodes_to_link(sheet_thickness)
 
         return (
             -self.sheet_conductivity 
             * sheet_thickness_on_links**self.sheet_flow_exp 
-            * jnp.abs(gradient)**(-1/2) 
-            * gradient
+            * jnp.abs(gradient)**(-1/2)
+        )
+
+    def sheet_discharge_on_links(self, potential: jnp.array, sheet_thickness: jnp.array) -> jnp.array:
+        """Interpolate discharge from the distributed system onto grid links."""
+        return (
+            self.sheet_discharge_coeff(potential, sheet_thickness)
+            * self.grid.calc_grad_at_link(potential)
+        )
+
+    def channel_discharge_coeff(self, channel_size: jnp.array) -> jnp.array:
+        """Calculate the discharge coefficient for active channels."""
+        return (
+            -self.channel_conductivity * channel_size**self.channel_flow_exp 
         )
 
     def channel_discharge(self, potential: jnp.array, channel_size: jnp.array) -> jnp.array:
         """Calculate the discharge in active channels."""
-        gradient = self.grid.calc_grad_at_link(potential)
-
         return (
-            -self.channel_conductivity 
-            * channel_size**self.channel_flow_exp 
-            * gradient
+            self.channel_discharge_coeff(channel_size) * self.grid.calc_grad_at_link(potential)
         )
 
     def calc_sheet_opening(self, sheet_thickness: jnp.array) -> jnp.array:
@@ -166,13 +175,13 @@ class SubglacialDrainageSystem(eqx.Module):
         channel_size: jnp.array
     ) -> jnp.array:
         """Calculate the dissipation of potential energy in the channelized system."""
-        gradient = self.grid.calc_grad_at_link(potential)
-        sheet_discharge = self.sheet_discharge_on_links(potential, sheet_thickness)
+        sheet_discharge_on_links = self.sheet_discharge_on_links(potential, sheet_thickness)
         channel_discharge = self.channel_discharge(potential, channel_size)
+        gradient = self.grid.calc_grad_at_link(potential)
 
         return (
-            jnp.abs(channel_discharge * gradient) 
-            + jnp.abs(self.cavity_spacing * sheet_discharge * gradient)
+            jnp.abs(self.cavity_spacing * sheet_discharge_on_links * gradient)
+            + jnp.abs(channel_discharge * gradient)
         )
 
     def sensible_heat(
@@ -191,7 +200,7 @@ class SubglacialDrainageSystem(eqx.Module):
         pressure_gradient = self.grid.calc_grad_at_link(water_pressure)
 
         total_discharge = jnp.where(
-            (channel_size > 0) | (pressure_gradient * sheet_discharge > 0),
+            (channel_size > 0) | ((pressure_gradient * sheet_discharge) > 0),
             channel_discharge + self.cavity_spacing * sheet_discharge,
             channel_discharge
         )
@@ -261,8 +270,8 @@ class SubglacialDrainageSystem(eqx.Module):
         """Update the cross-sectional area of active channels."""
         dSdt = lambda S: (
             (
-                self.energy_dissipation(potential, self.sheet_thickness, S)
-                - self.sensible_heat(potential, self.sheet_thickness, S)
+                self.energy_dissipation(potential, sheet_thickness, S)
+                - self.sensible_heat(potential, sheet_thickness, S)
             ) / (self.state.ice_density * self.state.ice_latent_heat)
             - self.calc_channel_closure(potential, S)
         )
@@ -278,281 +287,150 @@ class SubglacialDrainageSystem(eqx.Module):
             solution.value
         )
 
-
-
-
-
-
-
-
-    def _jit_assemble_operator(
+    def build_forcing_vector(
         self,
-        previous_potential: jnp.array,
-        channel_size: jnp.array,
-        sheet_thickness: jnp.array
-    ):
-        """JIT-compatible assembly of the linear operator."""
-        previous_gradients = self.grid.calc_grad_at_link(previous_potential)
-        channel_discharge = (
-            -self.channel_conductivity * channel_size**self.flow_exp * previous_gradients
+        potential: jnp.array,
+        sheet_thickness: jnp.array,
+        channel_size: jnp.array
+    ) -> jnp.array:
+        """Calculate the forcing vector for potential at grid cells."""
+        sheet_opening = self.calc_sheet_opening(sheet_thickness)
+        sheet_closure = self.calc_sheet_closure(potential, sheet_thickness)
+        channel_closure = self.grid.map_mean_of_links_to_node(
+            self.calc_channel_closure(potential, channel_size)
         )
-        sheet_discharge = (
-            -self.sheet_conductivity 
-            * self.grid.map_mean_of_link_nodes_to_link(sheet_thickness)**self.flow_exp 
-            * jnp.abs(previous_gradients)**(-1/2)
-            * previous_gradients
+        channel_source = self.grid.sum_at_nodes(
+            self.exchange_term(potential, sheet_thickness)
         )
-        dissipation_coeff = (
-            ((1 / self.state.ice_density) - (1 / self.state.water_density))
+        sensible_heat = self.grid.map_mean_of_links_to_node(
+            self.sensible_heat(potential, sheet_thickness, channel_size)
+            * ((1 / self.state.ice_density) - (1 / self.state.water_density))
             * (1 / self.state.ice_latent_heat)
         )
-
-        def assemble_off_diag(out, i, j):
-            link = self.links_between_nodes[i, j]
-            face_length = self.grid.length_of_face[self.grid.face_at_link[link]]
-            link_length = self.grid.length_of_link[link]
-            channel_size_on_link = channel_size[link]
-            sheet_thickness_on_link = 0.5 * (sheet_thickness[i] + sheet_thickness[j])
-
-            sheet_flux = (
-                -self.sheet_conductivity 
-                * sheet_thickness_on_link**self.flow_exp
-                * jnp.abs(previous_gradients[link])**(-1/2)
-                * face_length
-                / link_length
-            )
-
-            channel_flux = (
-                -self.channel_conductivity
-                * channel_size_on_link**self.flow_exp
-                * face_length
-                / link_length
-            )
-
-            channel_dissipation = jnp.abs(
-                dissipation_coeff
-                * channel_discharge[link]
-                * face_length
-            )
-
-            sheet_dissipation = jnp.abs(
-                dissipation_coeff
-                * sheet_discharge[link]
-                * self.cavity_spacing
-                * face_length
-            )
-
-            sensible_heat = (
-                -self.heat_capacity * self.pressure_melt_coeff * self.state.water_density
-                * (
-                    channel_discharge[link] 
-                    + jnp.where(
-                        (channel_size[link] > 0) | 
-                        (sheet_discharge[link] * previous_gradients[link] > 0),
-                        self.cavity_spacing * sheet_discharge[link],
-                        0.0
-                    )
-                )
-            ) * dissipation_coeff
-
-            return jax.lax.cond(
-                self.inflow_outflow[j] == 1,
-                lambda _: out,
-                lambda _: out.at[j].set(
-                    (sheet_flux + channel_flux + channel_dissipation + sheet_dissipation - sensible_heat)
-                ).at[i].add(
-                    -(sheet_flux + channel_flux + channel_dissipation + sheet_dissipation - sensible_heat)
-                ),
-                0
-            )
-
-        def assemble_interior(i):
-            out = jnp.zeros(self.grid.number_of_nodes)
-
-            for j in self.grid.adjacent_nodes_at_node[i]:
-                out = jnp.where(
-                    j != -1,
-                    assemble_off_diag(out, i, j),
-                    out
-                )
-
-            return out
-
-        def assemble_boundary(i):
-            return jnp.zeros(self.grid.number_of_nodes).at[i].set(1)
-
-        def assemble_row(i):
-            return jax.lax.cond(
-                self.inflow_outflow[i] == -1,
-                assemble_boundary,
-                assemble_interior,
-                i
-            )
-
-        return jax.vmap(assemble_row)(jnp.arange(self.grid.number_of_nodes))
         
-    def _calc_forcing(
-        self, 
-        previous_potential: jnp.array,
-        channel_size: jnp.array,
-        sheet_thickness: jnp.array
-    ):
-        """Calculate the forcing term for the elliptic equation in potential."""
-        previous_gradients = self.grid.calc_grad_at_link(previous_potential)
-
-        channel_source = jnp.sum(
-            self._calc_exchange(previous_potential, sheet_thickness)[self.grid.links_at_node],
-            axis = 1
-        )
-
-        channel_closure = (
-            self.closure_coeff 
-            * (self.base_potential - previous_potential)**self.n
-            * self.grid.map_mean_of_links_to_node(channel_size)
-        )
-
-        sheet_source = jnp.where(
-            sheet_thickness < self.bedrock_step_height,
-            self.grid.map_mean_of_links_to_node(
-                jnp.abs(self.state.sliding_velocity / self.state.sec_per_a)
-            )
-            * (self.bedrock_step_height - sheet_thickness) 
-            / self.cavity_spacing,
-            0.0
-        )
-
-        sheet_closure = (
-            self.closure_coeff
-            * sheet_thickness
-            * (self.base_potential - previous_potential)**self.n
-        )
-
-        interior_forcing = (
-            channel_closure 
-            + channel_source 
-            + self.specific_melt_rate
+        forcing_at_nodes = (
+            self.melt_input
             + sheet_closure
-            - sheet_source
+            - sheet_opening
+            + channel_closure
+            + channel_source
+            + sensible_heat
         )
 
-        return jnp.where(
-            self.inflow_outflow == -1,
-            self.base_potential - self.state.overburden_pressure,
-            interior_forcing
-        )
+        return forcing_at_nodes[self.grid.node_at_cell]
 
-    def _solve_for_potential(
+    def assemble_linear_system(
         self,
         previous_potential: jnp.array,
-        channel_size: jnp.array,
-        sheet_thickness: jnp.array
-    ):
-        """Solve the elliptic equation for potential."""
-        matrix = self._jit_assemble_operator(previous_potential, channel_size, sheet_thickness)
-        operator = lx.MatrixLinearOperator(matrix)
-        forcing = self._calc_forcing(previous_potential, channel_size, sheet_thickness)
-        solution = lx.linear_solve(operator, forcing)
-
-        return solution.value
-    
-    def _update_channel_size(
-        self, 
-        dt: float, 
-        channel_size: jnp.array, 
         sheet_thickness: jnp.array,
-        potential: jnp.array
-    ):
-        """Update the cross-sectional area of channels on every link."""
-        grav_potential = self.state.water_density * self.state.gravity * self.state.bedrock_elevation
+        channel_size: jnp.array
+    ) -> tuple:
+        """Assemble the linear system for potential. Return the matrix 'A' and forcing 'b'."""
+        forcing = self.build_forcing_vector(previous_potential, sheet_thickness, channel_size)
 
-        dSdt = lambda S: dt * (
-            (
-                jnp.abs(
-                    -self.channel_conductivity * S**self.flow_exp * self.grid.calc_grad_at_link(potential)
+        def assemble_row(cell, dirichlet):
+            i = self.grid.node_at_cell[cell]
+            adj_nodes = self.grid.adjacent_nodes_at_node[i]
+            row = jnp.zeros(self.grid.number_of_cells)
+
+            heat_coeff = (
+                (1 / self.state.ice_density) - (1 / self.state.water_density)
+            ) * (1 / self.state.ice_latent_heat)
+
+            for j in adj_nodes:
+                adj = self.grid.cell_at_node[j]
+                link = self.links_between_nodes[i, j]
+                link_len = self.grid.length_of_link[link]
+                face_len = self.grid.length_of_face[self.grid.face_at_link[link]]
+                sheet_thickness_on_link = 0.5 * (sheet_thickness[i] + sheet_thickness[j])
+
+                sheet_flux = (
+                    -self.sheet_conductivity
+                    * sheet_thickness_on_link**self.sheet_flow_exp
+                    * jnp.abs(self.grid.calc_grad_at_link(previous_potential)[link])**(-1/2)
+                    * face_len
+                    / link_len
                 )
-                + jnp.abs(
-                    -self.sheet_conductivity 
-                    * self.cavity_spacing
-                    * self.grid.map_mean_of_link_nodes_to_link(sheet_thickness)**self.flow_exp 
-                    * self.grid.calc_grad_at_link(potential)
+
+                channel_flux = (
+                    -self.channel_conductivity
+                    * channel_size[link]**self.channel_flow_exp
+                    * face_len
+                    / link_len
                 )
-                - (
-                    -self.heat_capacity 
-                    * self.pressure_melt_coeff 
-                    * self.state.water_density
-                    * (
-                        -self.channel_conductivity * S**self.flow_exp * self.grid.calc_grad_at_link(potential)
-                        + jnp.where(
-                            (S > 0) | 
-                            (S * self.grid.calc_grad_at_link(potential - grav_potential) > 0),
-                            -self.cavity_spacing * self.sheet_conductivity * S**self.flow_exp * self.grid.calc_grad_at_link(potential),
-                            0.0
-                        )
+
+                dissipation = (
+                    self.energy_dissipation(
+                        previous_potential, sheet_thickness, channel_size
+                    )[link]
+                    * heat_coeff
+                    / link_len
+                )
+
+                coeffs = sheet_flux + channel_flux + dissipation
+
+                jax.lax.cond(
+                    self.set_inflow_outflow(previous_potential)[j] == -1,
+                    lambda: forcing.at[cell].add(coeffs * dirichlet[j]),
+                    lambda: forcing
+                )
+
+                row = jax.lax.cond(
+                    self.set_inflow_outflow(previous_potential)[j] == 0,
+                    lambda: row.at[adj].set(coeffs).at[cell].add(-coeffs),
+                    lambda: jax.lax.cond(
+                        self.set_inflow_outflow(previous_potential)[j] == -1,
+                        lambda: row.at[cell].add(-coeffs),
+                        lambda: row
                     )
                 )
-            )
-            / (self.state.ice_density * self.state.ice_latent_heat)
-            - self.closure_coeff 
-            * self.grid.map_mean_of_link_nodes_to_link(self.base_potential - potential)**self.n 
-            * S
+
+            return row
+        
+        vmapped = jax.vmap(assemble_row, in_axes = (0, None))
+
+        matrix = vmapped(
+            jnp.arange(self.grid.number_of_cells),
+            self.base_potential
         )
 
-        residual = lambda S, _: S - channel_size - dSdt(S)
+        return matrix, forcing
 
-        solver = optx.Newton(
-            rtol = 1e-5, atol = 1e-5,
-            linear_solver = lx.AutoLinearSolver(well_posed = None)
-        )
-        solution = optx.root_find(residual, solver, channel_size, args = None)
-
-        channel_size = jnp.where(
-            (self.inflow_outflow[self.grid.node_at_link_head] != 0) &
-            (self.inflow_outflow[self.grid.node_at_link_tail] != 0),
-            0.0,
-            solution.value
-        )
+    def solve_for_potential(
+        self,
+        previous_potential: jnp.array,
+        sheet_thickness: jnp.array,
+        channel_size: jnp.array
+    ) -> jnp.array:
+        """Solve the elliptic equation for potential."""
+        A, b = self.assemble_linear_system(previous_potential, sheet_thickness, channel_size)
+        operator = lx.MatrixLinearOperator(A)
+        solution = lx.linear_solve(operator, b)
 
         return jnp.where(
-            channel_size < self.min_channel_size,
-            self.min_channel_size,
-            channel_size
+            self.grid.cell_at_node != -1,
+            solution.value[self.grid.cell_at_node],
+            self.base_potential
         )
 
-    def _update_sheet_thickness(self, dt: float, sheet_thickness: jnp.array, potential: jnp.array):
-        """Update the mean thickness of flow in the distributed system."""
-        sliding = jnp.abs(
-            self.grid.map_mean_of_links_to_node(
-                self.state.sliding_velocity / self.state.sec_per_a
-            )
-        )
-
-        pressure = self.base_potential - potential
-
-        dhdt = lambda h: dt * (
-            sliding * (self.bedrock_step_height - h) / self.cavity_spacing
-            - self.closure_coeff * pressure**self.n * h
-        )
-
-        residual = lambda h, _: h - sheet_thickness - dhdt(h)
-
-        solver = optx.Newton(rtol = 1e-5, atol = 1e-5)
-        solution = optx.root_find(residual, solver, sheet_thickness, args = None)
-
-        return solution.value
-
-    # @jax.jit
     def update(self, dt: float):
         """Advance the model by one step."""
-        potential = self._solve_for_potential(
-            self.potential, self.channel_size, self.sheet_thickness
+        potential = self.solve_for_potential(
+            self.potential, self.sheet_thickness, self.channel_size
         )
-        sheet_thickness = self._update_sheet_thickness(dt, self.sheet_thickness, potential)
-        channel_size = self._update_channel_size(dt, self.channel_size, sheet_thickness, potential)
+
+        sheet_thickness = self.update_sheet_flow(
+            potential, self.sheet_thickness, dt
+        )
+
+        channel_size = self.update_channel_flow(
+            potential, sheet_thickness, self.channel_size, dt
+        )
 
         updated = eqx.tree_at(
-            lambda t: (t.potential, t.channel_size, t.sheet_thickness),
+            lambda t: (t.potential, t.sheet_thickness, t.channel_size),
             self,
-            (potential, channel_size, sheet_thickness)
+            (potential, sheet_thickness, channel_size)
         )
 
         return updated
