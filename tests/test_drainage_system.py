@@ -110,12 +110,6 @@ def test_initialize(grid, model):
     assert model.links_between_nodes.shape == (grid.number_of_nodes, grid.number_of_nodes)
 
 def test_tmp(grid, model):
-    m = model.exchange_term(model.potential, model.sheet_thickness)
+    m = model.exchange_term(grid.node_x + 100, model.sheet_thickness)
 
-    norms = model.grid.get_normal_at_links()
-    for link in range(model.grid.number_of_links):
-        mid = model.grid.midpoint_of_link[link]
-        plt.plot([mid[0], mid[0] + norms[link][0][0]], [mid[1], mid[1] + norms[link][0][1]], 'r')
-        plt.plot([mid[0], mid[0] + norms[link][1][0]], [mid[1], mid[1] + norms[link][1][1]], 'r')
-        plt.plot(mid[0], mid[1], 'bo')
-    plt.show()
+    plot_links(grid, m, title='Exchange Term')

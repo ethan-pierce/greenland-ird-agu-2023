@@ -45,6 +45,7 @@ class StaticGrid(eqx.Module):
     face_at_link: jax.Array = eqx.field(converter = jnp.asarray)
     link_at_face: jax.Array = eqx.field(converter = jnp.asarray)
     cell_at_node: jax.Array = eqx.field(converter = jnp.asarray)
+    node_at_cell: jax.Array = eqx.field(converter = jnp.asarray)
     corners_at_face: jax.Array = eqx.field(converter = jnp.asarray)
     nodes_at_patch: jax.Array = eqx.field(converter = jnp.asarray)
     patches_at_node: jax.Array = eqx.field(converter = jnp.asarray)
@@ -121,7 +122,7 @@ class StaticGrid(eqx.Module):
     def calc_grad_at_patch(self, array):
         """Calculate the gradient of an array at patches."""
         unit_normal = self.calc_unit_normal_at_patch(array)
-        theta = jnp.arctan2(-unit_normal[:, 1], -unit_normal[:, 0])
+        theta = jnp.arctan2(unit_normal[:, 1], unit_normal[:, 0])
         slope_at_patch = jnp.arccos(unit_normal[:, 2])
 
         components = (
@@ -188,27 +189,22 @@ class StaticGrid(eqx.Module):
 
     def get_normal_at_links(self):
         """Calculate the normal vector to each link."""
-        def at_one_link(l):
-            left = self.xy_of_patch[self.patches_at_link[l][0]]
-            right = jnp.where(
-                self.patches_at_link[l][1] != -1,
-                self.xy_of_patch[self.patches_at_link[l][1]],
-                jnp.asarray([jnp.nan, jnp.nan])
-            )
+        def norm_at_link(l):
+            head_x = self.node_x[self.node_at_link_head[l]]
+            head_y = self.node_y[self.node_at_link_head[l]]
 
-            mid = self.midpoint_of_link[l]
+            tail_x = self.node_x[self.node_at_link_tail[l]]
+            tail_y = self.node_y[self.node_at_link_tail[l]]
 
-            left_normal = jnp.asarray(
-                [left[0] - mid[0], left[1] - mid[1]]
-            )
+            dy = tail_y - head_y
+            dx = tail_x - head_x
 
-            right_normal = jnp.asarray(
-                [right[0] - mid[0], right[1] - mid[1]]
-            )
+            normal_a = jnp.asarray([-dy, dx])
+            normal_b = jnp.asarray([dy, -dx])
             
-            return jnp.asarray([left_normal, right_normal])
+            return jnp.asarray([normal_a, normal_b])
             
-        normals = jax.vmap(at_one_link)(jnp.arange(self.number_of_links))
+        normals = jax.vmap(norm_at_link)(jnp.arange(self.number_of_links))
         return normals
 
     def build_link_between_nodes_array(self):

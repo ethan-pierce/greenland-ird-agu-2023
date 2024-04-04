@@ -211,15 +211,30 @@ class SubglacialDrainageSystem(eqx.Module):
         normal_at_links = self.grid.get_normal_at_links()
 
         def discharge_dot_normal(link):
-            left_patch = jnp.dot(
-                discharge[self.grid.patches_at_link][link, 0],
-                normal_at_links[link, 0]
+            head_xy = jnp.asarray([
+                self.grid.node_x[self.grid.node_at_link_head[link]],
+                self.grid.node_y[self.grid.node_at_link_head[link]]
+            ])
+            first_patch_xy = self.grid.xy_of_patch[self.grid.patches_at_link[link, 0]]
+            second_patch_xy = self.grid.xy_of_patch[self.grid.patches_at_link[link, 1]]
+
+            first_patch = jnp.where(
+                jnp.dot(first_patch_xy - head_xy, normal_at_links[link, 0]) > 0,
+                jnp.dot(discharge[self.grid.patches_at_link[link, 0]], normal_at_links[link, 0]),
+                jnp.dot(discharge[self.grid.patches_at_link[link, 0]], normal_at_links[link, 1])
             )
-            right_patch = jnp.dot(
-                discharge[self.grid.patches_at_link][link, 1],
-                normal_at_links[link, 1]
+
+            second_patch = jax.lax.cond(
+                self.grid.patches_at_link[link, 1] != -1,
+                lambda: jnp.where(
+                    jnp.dot(second_patch_xy - head_xy, normal_at_links[link, 1]) > 0,
+                    jnp.dot(discharge[self.grid.patches_at_link[link, 1]], normal_at_links[link, 1]),
+                    jnp.dot(discharge[self.grid.patches_at_link[link, 1]], normal_at_links[link, 0])
+                ),
+                lambda: 0.0
             )
-            return jnp.nansum(jnp.asarray([left_patch, right_patch]))
+
+            return first_patch + second_patch
         
         return jax.vmap(discharge_dot_normal)(jnp.arange(self.grid.number_of_links))
 
