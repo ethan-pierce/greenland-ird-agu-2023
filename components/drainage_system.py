@@ -238,37 +238,52 @@ class SubglacialDrainageSystem(eqx.Module):
         
         return jax.vmap(discharge_dot_normal)(jnp.arange(self.grid.number_of_links))
 
-
-
-
-
-
-
-
-
-
-    def _calc_exchange(self, potential: jnp.array, sheet_thickness: jnp.array) -> jnp.array:
-        """Calculate the exchange of water between sheets and channels."""
-        flow_over_patch = self.grid.map_mean_of_patch_nodes_to_patch(
-            -self.sheet_conductivity 
-            * sheet_thickness**self.flow_exp 
+    def update_sheet_flow(self, potential: jnp.array, sheet_thickness: jnp.array, dt: float) -> jnp.array:
+        """Update the thickness of distributed sheet flow."""
+        dhdt = lambda h: (
+            self.calc_sheet_opening(h) - self.calc_sheet_closure(potential, h)
         )
-        _, comps = self.grid.calc_grad_at_patch(potential)
-        grad_at_patches = jnp.asarray([comps[0], comps[1]]).T * flow_over_patch[:, None]
-        normal_at_links = self.grid.get_normal_at_links()
 
-        def q_dot_n(link):
-            a = jnp.dot(
-                grad_at_patches[self.grid.patches_at_link][link, 0],
-                normal_at_links[link, 0]
-            )
-            b = jnp.dot(
-                grad_at_patches[self.grid.patches_at_link][link, 1],
-                normal_at_links[link, 1]
-            )
-            return jnp.nansum(jnp.asarray([a, b]))
+        residual = lambda h, _: h - sheet_thickness - dt * dhdt(h)
 
-        return jax.vmap(q_dot_n)(jnp.arange(self.grid.number_of_links))
+        solver = optx.Newton(rtol = 1e-5, atol = 1e-5)
+        solution = optx.root_find(residual, solver, sheet_thickness, args = None)
+
+        return solution.value
+
+    def update_channel_flow(
+        self, 
+        potential: jnp.array, 
+        sheet_thickness: jnp.array,
+        channel_size: jnp.array, 
+        dt: float
+    ) -> jnp.array:
+        """Update the cross-sectional area of active channels."""
+        dSdt = lambda S: (
+            (
+                self.energy_dissipation(potential, self.sheet_thickness, S)
+                - self.sensible_heat(potential, self.sheet_thickness, S)
+            ) / (self.state.ice_density * self.state.ice_latent_heat)
+            - self.calc_channel_closure(potential, S)
+        )
+
+        residual = lambda S, _: S - channel_size - dt * dSdt(S)
+
+        solver = optx.Newton(rtol = 1e-5, atol = 1e-5)
+        solution = optx.root_find(residual, solver, channel_size, args = None)
+
+        return jnp.where(
+            solution.value < self.min_channel_size,
+            self.min_channel_size,
+            solution.value
+        )
+
+
+
+
+
+
+
 
     def _jit_assemble_operator(
         self,

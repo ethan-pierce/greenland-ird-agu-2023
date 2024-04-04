@@ -109,7 +109,3 @@ def test_initialize(grid, model):
     assert model.channel_size.shape == (grid.number_of_links,)
     assert model.links_between_nodes.shape == (grid.number_of_nodes, grid.number_of_nodes)
 
-def test_tmp(grid, model):
-    m = model.exchange_term(grid.node_x + 100, model.sheet_thickness)
-
-    plot_links(grid, m, title='Exchange Term')
