@@ -131,4 +131,14 @@ def test_tmp(grid, model):
         - model.calc_channel_closure(phi, model.channel_size)
     )
 
+    S1 = np.full(grid.number_of_links, 1e-3)
+    plot_links(
+        grid,
+        (   
+            model.energy_dissipation(phi, h, S1)
+            - model.sensible_heat(phi, h, S1)
+        ) / (model.state.ice_density * model.state.ice_latent_heat)
+        - model.calc_channel_closure(phi, S1)
+    )
+
     
