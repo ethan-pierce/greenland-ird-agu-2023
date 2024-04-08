@@ -5,6 +5,7 @@ import jax.numpy as jnp
 import equinox as eqx
 import lineax as lx
 import optimistix as optx
+from functools import partial
 
 from utils import StaticGrid
 from components import ModelState
@@ -78,20 +79,20 @@ class SubglacialDrainageSystem(eqx.Module):
     
     def set_inflow_outflow(self, potential: jnp.array) -> jnp.array:
         """Determine whether boundary nodes expect inflow or outflow."""
-        max_adj_potential = jnp.max(
+        min_adj_potential = jnp.min(
             jnp.where(
                 self.grid.adjacent_nodes_at_node != -1,
                 potential[self.grid.adjacent_nodes_at_node],
-                -jnp.inf
+                jnp.inf
             ),
             axis = 1
         )
 
         # 1 denotes inflow, -1 denotes outflow
         inflow_outflow = jnp.where(
-            potential > max_adj_potential,
-            1 * (self.grid.status_at_node > 0),
-            -1 * (self.grid.status_at_node > 0)
+            potential < min_adj_potential,
+            -1 * (self.grid.status_at_node > 0),
+            1 * (self.grid.status_at_node > 0)
         )
 
         return inflow_outflow
@@ -278,8 +279,8 @@ class SubglacialDrainageSystem(eqx.Module):
 
         residual = lambda S, _: S - channel_size - dt * dSdt(S)
 
-        solver = optx.LevenbergMarquardt(rtol = 1e-5, atol = 1e-5)
-        solution = optx.least_squares(residual, solver, channel_size, args = None)
+        solver = optx.Newton(rtol = 1e-5, atol = 1e-5)
+        solution = optx.root_find(residual, solver, channel_size, args = None)
 
         return jnp.where(
             solution.value < self.min_channel_size,
@@ -302,10 +303,17 @@ class SubglacialDrainageSystem(eqx.Module):
         channel_source = self.grid.sum_at_nodes(
             self.exchange_term(potential, sheet_thickness)
         )
+
+        heat_coeff = (
+            (1 / self.state.ice_density) - (1 / self.state.water_density)
+        ) * (1 / self.state.ice_latent_heat)
         sensible_heat = self.grid.map_mean_of_links_to_node(
             self.sensible_heat(potential, sheet_thickness, channel_size)
-            * ((1 / self.state.ice_density) - (1 / self.state.water_density))
-            * (1 / self.state.ice_latent_heat)
+        )
+        dissipation = self.grid.map_mean_of_links_to_node(
+            self.energy_dissipation(
+                potential, sheet_thickness, channel_size
+            )
         )
         
         forcing_at_nodes = (
@@ -314,7 +322,7 @@ class SubglacialDrainageSystem(eqx.Module):
             - sheet_opening
             + channel_closure
             + channel_source
-            + sensible_heat
+            + (dissipation - sensible_heat) * heat_coeff
         )
 
         return forcing_at_nodes[self.grid.node_at_cell]
@@ -326,75 +334,84 @@ class SubglacialDrainageSystem(eqx.Module):
         channel_size: jnp.array
     ) -> tuple:
         """Assemble the linear system for potential. Return the matrix 'A' and forcing 'b'."""
-        forcing = self.build_forcing_vector(previous_potential, sheet_thickness, channel_size)
 
-        def assemble_row(cell, dirichlet):
+        def update_coeffs(forcing, j, cell, row):
+            i = self.grid.node_at_cell[cell]
+            adj = self.grid.cell_at_node[j]
+            link = self.links_between_nodes[i, j]
+            link_len = self.grid.length_of_link[link]
+            face_len = self.grid.length_of_face[self.grid.face_at_link[link]]
+            sheet_thickness_on_link = 0.5 * (sheet_thickness[i] + sheet_thickness[j])
+
+            sheet_flux = (
+                -self.sheet_conductivity
+                * sheet_thickness_on_link**self.sheet_flow_exp
+                * jnp.abs(self.grid.calc_grad_at_link(previous_potential)[link])**(-1/2)
+                * face_len
+                / link_len
+            )
+
+            channel_flux = 0.5 * (
+                -self.channel_conductivity
+                * channel_size[link]**self.channel_flow_exp
+                * face_len
+                / link_len
+            )
+
+            coeffs = sheet_flux + channel_flux
+
+            boundaries = self.set_inflow_outflow(self.base_potential)
+
+            return_forcing = jax.lax.cond(
+                (boundaries[j] == -1) & (self.grid.adjacent_nodes_at_node[i, j] != -1),
+                lambda: forcing + (-coeffs * self.base_potential[j]),
+                lambda: forcing
+            )
+
+            # This is a triple conditional switch to handle interior, inflow, and outflow boundaries
+            # First condition: if not a boundary // else
+            updated_row = jnp.where(
+                boundaries[j] == 0,
+                # If the adjacent node is not a boundary, matrix[i, j] = coeffs and matrix[i, i] += -coeffs
+                row.at[adj].set(coeffs).at[cell].add(-coeffs),
+                # Second condition: if inflow boundary // else (must be outflow boundary)
+                jnp.where(
+                    boundaries[j] == 1,
+                    # If the adjacent node is an inflow boundary, matrix[i, j] = 0 and matrix[i, i] += 0
+                    row,
+                    # If the adjacent node is an outflow boundary, matrix[i, i] += -coeffs and forcing[i] += -coeffs * boundary value
+                    row.at[cell].add(-coeffs)
+                )
+            )
+
+            return_row = jax.lax.cond(
+                self.grid.adjacent_nodes_at_node[i, j] != -1,
+                lambda: updated_row,
+                lambda: row
+            )
+
+            return return_forcing, return_row
+
+        def assemble_row(cell):
             i = self.grid.node_at_cell[cell]
             adj_nodes = self.grid.adjacent_nodes_at_node[i]
             row = jnp.zeros(self.grid.number_of_cells)
 
-            heat_coeff = (
-                (1 / self.state.ice_density) - (1 / self.state.water_density)
-            ) * (1 / self.state.ice_latent_heat)
+            forcing, row = jax.lax.scan(
+                partial(update_coeffs, cell = cell, row = row),
+                init = 0.0,
+                xs = adj_nodes,
+                length = len(adj_nodes)
+            )
 
-            for j in adj_nodes:
-                adj = self.grid.cell_at_node[j]
-                link = self.links_between_nodes[i, j]
-                link_len = self.grid.length_of_link[link]
-                face_len = self.grid.length_of_face[self.grid.face_at_link[link]]
-                sheet_thickness_on_link = 0.5 * (sheet_thickness[i] + sheet_thickness[j])
+            return forcing, row
 
-                sheet_flux = (
-                    -self.sheet_conductivity
-                    * sheet_thickness_on_link**self.sheet_flow_exp
-                    * jnp.abs(self.grid.calc_grad_at_link(previous_potential)[link])**(-1/2)
-                    * face_len
-                    / link_len
-                )
+        forcing, matrix = jax.vmap(assemble_row)(jnp.arange(self.grid.number_of_cells))
 
-                channel_flux = (
-                    -self.channel_conductivity
-                    * channel_size[link]**self.channel_flow_exp
-                    * face_len
-                    / link_len
-                )
+        base_forcing = self.build_forcing_vector(previous_potential, sheet_thickness, channel_size)
+        vector = jnp.add(forcing, base_forcing)
 
-                dissipation = (
-                    self.energy_dissipation(
-                        previous_potential, sheet_thickness, channel_size
-                    )[link]
-                    * heat_coeff
-                    / link_len
-                )
-
-                coeffs = sheet_flux + channel_flux + dissipation
-
-                jax.lax.cond(
-                    self.set_inflow_outflow(previous_potential)[j] == -1,
-                    lambda: forcing.at[cell].add(coeffs * dirichlet[j]),
-                    lambda: forcing
-                )
-
-                row = jax.lax.cond(
-                    self.set_inflow_outflow(previous_potential)[j] == 0,
-                    lambda: row.at[adj].set(coeffs).at[cell].add(-coeffs),
-                    lambda: jax.lax.cond(
-                        self.set_inflow_outflow(previous_potential)[j] == -1,
-                        lambda: row.at[cell].add(-coeffs),
-                        lambda: row
-                    )
-                )
-
-            return row
-        
-        vmapped = jax.vmap(assemble_row, in_axes = (0, None))
-
-        matrix = vmapped(
-            jnp.arange(self.grid.number_of_cells),
-            self.base_potential
-        )
-
-        return matrix, forcing
+        return matrix, vector
 
     def solve_for_potential(
         self,
@@ -413,6 +430,7 @@ class SubglacialDrainageSystem(eqx.Module):
             self.base_potential
         )
 
+    @jax.jit
     def update(self, dt: float):
         """Advance the model by one step."""
         potential = self.solve_for_potential(

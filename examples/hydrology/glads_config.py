@@ -1,12 +1,12 @@
 """Test the ConduitHydrology implementation."""
 
 import numpy as np
-from numpy.testing import *
 import jax
 import jax.numpy as jnp
 import equinox as eqx
 import optimistix as optx
-import pytest
+
+import matplotlib.pyplot as plt
 
 from landlab import TriangleModelGrid
 from utils import StaticGrid, freeze_grid
@@ -20,7 +20,7 @@ def make_grid():
             [1, 1, 20e3, 20e3],
             [1, 60e3, 60e3, 1]
         ),
-        triangle_opts = 'pqDevjza500000q26',
+        triangle_opts = 'pqDevjza1000000q26',
         sort = False
     )
     static = freeze_grid(g)
@@ -34,7 +34,7 @@ def make_grid():
     rng = np.random.default_rng(135)
     g.add_field(
         'bedrock_elevation',
-        rng.random(g.number_of_nodes) + (np.max(g.node_x) - g.node_x) * 1e-3,
+        rng.random(g.number_of_nodes) + (g.node_x - np.max(g.node_x)) * 1e-3,
         at = 'node'
     )
 
@@ -73,11 +73,6 @@ def make_grid():
 
     return g
 
-@pytest.fixture
-def grid():
-    return make_grid()
-
-@pytest.fixture
 def state(grid):
     """Instantiate the ModelState."""
     return ModelState(
@@ -89,7 +84,6 @@ def state(grid):
         grid.at_node['water_pressure']
     )
 
-@pytest.fixture
 def model(state, grid):
     """Create an instance of the SubglacialDrainageSystem model."""
     return SubglacialDrainageSystem(
@@ -100,59 +94,64 @@ def model(state, grid):
         np.full(grid.number_of_links, 0.0),
     )
 
-def test_channel_source(grid, model):
-    m = model.exchange_term(grid.node_y**2, model.sheet_thickness)
+if __name__ == '__main__':
+    print('Generating grid...')
+    grid = make_grid()
 
-    plot_triangle_mesh(grid, grid.node_y**2, subplots_args={'figsize': (18, 4)})
+    print('Instantiating model...')
+    state = state(grid)
+    model = model(state, grid)
 
-    plot_links(grid, m, subplots_args={'figsize': (18, 4)})
+    init_forcing = model.build_forcing_vector(model.potential, model.sheet_thickness, model.channel_size)
+    _, updated_forcing = model.assemble_linear_system(model.potential, model.sheet_thickness, model.channel_size)
 
-# def test_tmp(grid, model):
+    altered = jnp.where(init_forcing != updated_forcing, 1, 0)
 
-#     model = model.update(60.0)
+    im = plt.scatter(
+        grid.node_x,
+        grid.node_y,
+        c = jnp.where(model.grid.cell_at_node != -1, altered[model.grid.cell_at_node], jnp.nan)
+    )
+    plt.colorbar(im)
+    plt.show()
 
-#     import time
-#     start = time.time()
-#     model = model.update(60.0)
-#     print('Iteration time:', time.time() - start)
 
-#     for i in range(5):
-#         model = model.update(60.0 * 60.0)
+    # print('Running model...')
+    # for i in range(50):
+    #     model = model.update(60.0 * 60.0 * 6)
 
-#         print('Iteration', i)
+    #     if i % 10 == 0:
+    #         print('Completed iteration', i)
 
-#     plot_triangle_mesh(
-#         grid,
-#         model.base_potential - model.potential,
-#         subplots_args = {'figsize': (18, 4)},
-#         title = 'Effective pressure (Pa)'
-#     )
+    # plot_triangle_mesh(
+    #     grid,
+    #     model.sheet_thickness,
+    #     subplots_args = {'figsize': (18, 4)}
+    # )
 
-#     Qc = jnp.abs(
-#         -model.channel_conductivity
-#         * model.channel_size**model.flow_exp
-#         * model.grid.calc_grad_at_link(model.potential)
-#     )
-#     plot_links(
-#         grid,
-#         Qc,
-#         subplots_args = {'figsize': (18, 4)},
-#         title = 'Channelized discharge (m$^3$ s$^{-1}$)'
-#     )
+    # plot_triangle_mesh(
+    #     grid,
+    #     model.grid.map_mean_of_links_to_node(
+    #         jnp.abs(model.sheet_discharge_on_links(model.potential, model.sheet_thickness))
+    #     ),
+    #     subplots_args = {'figsize': (18, 4)}
+    # )
 
-#     gradient = model.grid.map_mean_of_links_to_node(
-#         model.grid.calc_grad_at_link(model.potential)
-#     )
-#     Qs = jnp.abs(
-#         -model.sheet_conductivity
-#         * model.sheet_thickness**model.flow_exp
-#         * jnp.power(jnp.abs(gradient), -1/2)
-#         * gradient
-#     )
-#     plot_triangle_mesh(
-#         grid,
-#         Qs,
-#         subplots_args = {'figsize': (18, 4)},
-#         title = 'Distributed discharge (m$^3$ s$^{-1}$)'
-#     )
+    # plot_links(
+    #     grid,
+    #     jnp.log10(model.channel_size),
+    #     subplots_args = {'figsize': (18, 4)}
+    # )
 
+    # Q = jnp.abs(model.channel_discharge(model.potential, model.channel_size))
+    # plot_links(
+    #     grid,
+    #     jnp.where(Q > jnp.percentile(Q, 90), 2, jnp.where(Q > jnp.percentile(Q, 80), 1, 0)),
+    #     subplots_args = {'figsize': (18, 4)}
+    # )
+
+    # plot_triangle_mesh(
+    #     grid,
+    #     model.potential,
+    #     subplots_args = {'figsize': (18, 4)}
+    # )
