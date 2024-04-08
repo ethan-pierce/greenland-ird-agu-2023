@@ -278,8 +278,8 @@ class SubglacialDrainageSystem(eqx.Module):
 
         residual = lambda S, _: S - channel_size - dt * dSdt(S)
 
-        solver = optx.Newton(rtol = 1e-5, atol = 1e-5)
-        solution = optx.root_find(residual, solver, channel_size, args = None)
+        solver = optx.LevenbergMarquardt(rtol = 1e-5, atol = 1e-5)
+        solution = optx.least_squares(residual, solver, channel_size, args = None)
 
         return jnp.where(
             solution.value < self.min_channel_size,
