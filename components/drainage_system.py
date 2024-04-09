@@ -327,6 +327,69 @@ class SubglacialDrainageSystem(eqx.Module):
 
         return forcing_at_nodes[self.grid.node_at_cell]
 
+    def get_coeffs_at_link(
+        self, cell: int, j: int,
+        potential: jnp.array,
+        sheet_thickness: jnp.array,
+        channel_size: jnp.array
+    ) -> float:
+        """Get the coefficients of the linear system at the link between a cell and neighboring node 'j'."""
+        i = self.grid.node_at_cell[cell]
+        link = self.links_between_nodes[i, j]
+        link_len = self.grid.length_of_link[link]
+        face_len = self.grid.length_of_face[self.grid.face_at_link[link]]
+        sheet_thickness_on_link = 0.5 * (sheet_thickness[i] + sheet_thickness[j])
+
+        sheet_flux = (
+            -self.sheet_conductivity
+            * sheet_thickness_on_link**self.sheet_flow_exp
+            * jnp.abs(self.grid.calc_grad_at_link(potential)[link])**(-1/2)
+            * face_len
+            / link_len
+        )
+
+        channel_flux = 0.5 * (
+            -self.channel_conductivity
+            * channel_size[link]**self.channel_flow_exp
+            * face_len
+            / link_len
+        )
+
+        return sheet_flux + channel_flux
+
+    def assemble_row(
+        self, 
+        cell: int, 
+        potential: jnp.array, 
+        sheet_thickness: jnp.array, 
+        channel_size: jnp.array
+    ) -> tuple:
+        """Assemble the matrix entries and any addition to the forcing vector at one cell."""
+        i = self.grid.node_at_cell[cell]
+        adj_nodes = self.grid.adjacent_nodes_at_node[i]
+
+        get_coeffs = jax.vmap(
+            lambda j: self.get_coeffs_at_link(cell, j, potential, sheet_thickness, channel_size)
+        )
+
+        coeffs = jnp.where(
+            adj_nodes != -1,
+            get_coeffs(adj_nodes),
+            0.0
+        )
+
+        boundary_tags = self.set_inflow_outflow(potential)
+
+        forcing = jnp.where(
+            (boundary_tags[adj_nodes] == -1) & (adj_nodes != -1),
+            -coeffs * self.base_potential[adj_nodes],
+            0.0
+        )
+        
+        row_diagonal = jnp.zeros(self.grid.number_of_cells).at[cell].set(-jnp.sum(coeffs))
+
+        return (jnp.sum(forcing), row_diagonal)
+
     def assemble_linear_system(
         self,
         previous_potential: jnp.array,
@@ -335,83 +398,59 @@ class SubglacialDrainageSystem(eqx.Module):
     ) -> tuple:
         """Assemble the linear system for potential. Return the matrix 'A' and forcing 'b'."""
 
-        def update_coeffs(forcing, j, cell, row):
-            i = self.grid.node_at_cell[cell]
-            adj = self.grid.cell_at_node[j]
-            link = self.links_between_nodes[i, j]
-            link_len = self.grid.length_of_link[link]
-            face_len = self.grid.length_of_face[self.grid.face_at_link[link]]
-            sheet_thickness_on_link = 0.5 * (sheet_thickness[i] + sheet_thickness[j])
+        # This function is guaranteed to receive a valid cell id and valid adjacent node j
+        # def add_coeffs_at_link(carry, j, cell):
+        #     forcing, matrix = carry
+        #     adj_cell = self.grid.cell_at_node[j]
+    
+        #     coeffs = self.get_coeffs_at_link(cell, j, previous_potential, sheet_thickness, channel_size)
 
-            sheet_flux = (
-                -self.sheet_conductivity
-                * sheet_thickness_on_link**self.sheet_flow_exp
-                * jnp.abs(self.grid.calc_grad_at_link(previous_potential)[link])**(-1/2)
-                * face_len
-                / link_len
-            )
+        #     boundaries = self.set_inflow_outflow(self.base_potential)
 
-            channel_flux = 0.5 * (
-                -self.channel_conductivity
-                * channel_size[link]**self.channel_flow_exp
-                * face_len
-                / link_len
-            )
+        #     forcing = jax.lax.cond(
+        #         boundaries[j] == -1,
+        #         lambda: forcing.at[cell].set(-coeffs * self.base_potential[j]),
+        #         lambda: forcing
+        #     )
 
-            coeffs = sheet_flux + channel_flux
+        #     # This is a triple conditional switch to handle interior, inflow, and outflow boundaries
+        #     # First condition: if not a boundary // else
+        #     matrix = jnp.where(
+        #         boundaries[j] == 0,
+        #         # If the adjacent node is not a boundary, matrix[i, j] = coeffs and matrix[i, i] += -coeffs
+        #         matrix.at[cell, adj_cell].set(coeffs).at[cell, cell].add(-coeffs),
+        #         # Second condition: if inflow boundary // else (must be outflow boundary)
+        #         jnp.where(
+        #             boundaries[j] == 1,
+        #             # If the adjacent node is an inflow boundary, matrix[i, j] = 0 and matrix[i, i] += 0
+        #             matrix,
+        #             # If the adjacent node is an outflow boundary, matrix[i, i] += -coeffs and forcing[i] += -coeffs * boundary value
+        #             matrix.at[cell, cell].add(-coeffs)
+        #         )
+        #     )
 
-            boundaries = self.set_inflow_outflow(self.base_potential)
+        #     return (forcing, matrix), None
 
-            return_forcing = jax.lax.cond(
-                (boundaries[j] == -1) & (self.grid.adjacent_nodes_at_node[i, j] != -1),
-                lambda: forcing + (-coeffs * self.base_potential[j]),
-                lambda: forcing
-            )
+        # empty_forcing = jnp.zeros(self.grid.number_of_cells)
+        # empty_matrix = jnp.zeros((self.grid.number_of_cells, self.grid.number_of_cells))
 
-            # This is a triple conditional switch to handle interior, inflow, and outflow boundaries
-            # First condition: if not a boundary // else
-            updated_row = jnp.where(
-                boundaries[j] == 0,
-                # If the adjacent node is not a boundary, matrix[i, j] = coeffs and matrix[i, i] += -coeffs
-                row.at[adj].set(coeffs).at[cell].add(-coeffs),
-                # Second condition: if inflow boundary // else (must be outflow boundary)
-                jnp.where(
-                    boundaries[j] == 1,
-                    # If the adjacent node is an inflow boundary, matrix[i, j] = 0 and matrix[i, i] += 0
-                    row,
-                    # If the adjacent node is an outflow boundary, matrix[i, i] += -coeffs and forcing[i] += -coeffs * boundary value
-                    row.at[cell].add(-coeffs)
-                )
-            )
+        # carry, _ = jax.lax.scan(
+        #     assemble_row,
+        #     (empty_forcing, empty_matrix),
+        #     jnp.arange(self.grid.number_of_cells)
+        # )
 
-            return_row = jax.lax.cond(
-                self.grid.adjacent_nodes_at_node[i, j] != -1,
-                lambda: updated_row,
-                lambda: row
-            )
-
-            return return_forcing, return_row
-
-        def assemble_row(cell):
-            i = self.grid.node_at_cell[cell]
-            adj_nodes = self.grid.adjacent_nodes_at_node[i]
-            row = jnp.zeros(self.grid.number_of_cells)
-
-            forcing, row = jax.lax.scan(
-                partial(update_coeffs, cell = cell, row = row),
-                init = 0.0,
-                xs = adj_nodes,
-                length = len(adj_nodes)
-            )
-
-            return forcing, row
-
-        forcing, matrix = jax.vmap(assemble_row)(jnp.arange(self.grid.number_of_cells))
+        forcing, matrix = jax.vmap(self.assemble_row, in_axes = (0, None, None, None))(
+            jnp.arange(self.grid.number_of_cells),
+            previous_potential,
+            sheet_thickness,
+            channel_size
+        )
 
         base_forcing = self.build_forcing_vector(previous_potential, sheet_thickness, channel_size)
-        vector = jnp.add(forcing, base_forcing)
+        forcing = jnp.add(forcing, base_forcing)
 
-        return matrix, vector
+        return forcing, matrix
 
     def solve_for_potential(
         self,

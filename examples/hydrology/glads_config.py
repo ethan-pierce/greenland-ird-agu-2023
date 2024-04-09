@@ -102,17 +102,10 @@ if __name__ == '__main__':
     state = state(grid)
     model = model(state, grid)
 
-    init_forcing = model.build_forcing_vector(model.potential, model.sheet_thickness, model.channel_size)
-    _, updated_forcing = model.assemble_linear_system(model.potential, model.sheet_thickness, model.channel_size)
+    b, A = model.assemble_linear_system(model.potential, model.sheet_thickness, model.channel_size)
+    base_forcing = model.build_forcing_vector(model.potential, model.sheet_thickness, model.channel_size)
 
-    altered = jnp.where(init_forcing != updated_forcing, 1, 0)
-
-    im = plt.scatter(
-        grid.node_x,
-        grid.node_y,
-        c = jnp.where(model.grid.cell_at_node != -1, altered[model.grid.cell_at_node], jnp.nan)
-    )
-    plt.colorbar(im)
+    plt.plot(b - base_forcing)
     plt.show()
 
 
