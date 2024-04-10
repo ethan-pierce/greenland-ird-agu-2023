@@ -26,6 +26,8 @@ class SubglacialDrainageSystem(eqx.Module):
     channel_size: jnp.array = eqx.field(converter = jnp.asarray)
 
     links_between_nodes: jnp.array = eqx.field(converter = jnp.asarray, init = False)
+    boundary_tags: jnp.array = eqx.field(converter = jnp.asarray, init = False)
+    status_at_link: jnp.array = eqx.field(converter = jnp.asarray, init = False)
 
     sheet_conductivity: float = 1e-2 # m^7/4 kg^-1/2
     sheet_flow_exp: float = 5/4
@@ -43,6 +45,17 @@ class SubglacialDrainageSystem(eqx.Module):
         """Initialize remaining model fields."""
         self.grid = self.state.grid
         self.links_between_nodes = self.grid.build_link_between_nodes_array()
+
+        # 1 if inflow, -1 if outflow, 0 if interior
+        self.boundary_tags = self.set_inflow_outflow(self.base_potential)
+
+        # 1 if connected to Neumann boundary node, 0 otherwise
+        self.status_at_link = jnp.where(
+            (self.boundary_tags[self.grid.node_at_link_head] == 1) |
+            (self.boundary_tags[self.grid.node_at_link_tail] == 1),
+            1,
+            0
+        )
 
     @property
     def base_potential(self) -> jnp.array:
@@ -63,6 +76,15 @@ class SubglacialDrainageSystem(eqx.Module):
         return (
             self.state.melt_rate / self.state.sec_per_a
             + self.surface_melt_rate
+        )
+
+    def calc_grad_at_link(self, array: jnp.array) -> jnp.array:
+        """Calculate the gradient of an array at links, respecting Neumann boundaries."""
+        grad = self.grid.calc_grad_at_link(array)
+        return jnp.where(
+            self.grid.status_at_link == 0,
+            grad,
+            0.0
         )
 
     def set_flow_direction(self, potential: jnp.array) -> jnp.array:
@@ -90,7 +112,7 @@ class SubglacialDrainageSystem(eqx.Module):
 
         # 1 denotes inflow, -1 denotes outflow
         inflow_outflow = jnp.where(
-            potential < min_adj_potential,
+            potential <= min_adj_potential,
             -1 * (self.grid.status_at_node > 0),
             1 * (self.grid.status_at_node > 0)
         )
@@ -107,32 +129,42 @@ class SubglacialDrainageSystem(eqx.Module):
 
     def sheet_discharge_coeff(self, potential: jnp.array, sheet_thickness: jnp.array) -> jnp.array:
         """Calculate the discharge coefficient for distributed sheet flow."""
-        gradient = self.grid.calc_grad_at_link(potential)
+        gradient = self.calc_grad_at_link(potential)
         sheet_thickness_on_links = self.grid.map_mean_of_link_nodes_to_link(sheet_thickness)
 
-        return (
+        coeff = (
             -self.sheet_conductivity 
             * sheet_thickness_on_links**self.sheet_flow_exp 
             * jnp.abs(gradient)**(-1/2)
+        )
+
+        return jnp.where(
+            gradient == 0,
+            0.0,
+            coeff
         )
 
     def sheet_discharge_on_links(self, potential: jnp.array, sheet_thickness: jnp.array) -> jnp.array:
         """Interpolate discharge from the distributed system onto grid links."""
         return (
             self.sheet_discharge_coeff(potential, sheet_thickness)
-            * self.grid.calc_grad_at_link(potential)
+            * self.calc_grad_at_link(potential)
         )
 
-    def channel_discharge_coeff(self, channel_size: jnp.array) -> jnp.array:
+    def channel_discharge_coeff(self, potential: jnp.array, channel_size: jnp.array) -> jnp.array:
         """Calculate the discharge coefficient for active channels."""
-        return (
-            -self.channel_conductivity * channel_size**self.channel_flow_exp 
+        gradient = self.calc_grad_at_link(potential)
+        coeff = -self.channel_conductivity * channel_size**self.channel_flow_exp * jnp.abs(gradient)**(0)
+        return jnp.where(
+            gradient == 0,
+            0.0,
+            coeff
         )
 
     def channel_discharge(self, potential: jnp.array, channel_size: jnp.array) -> jnp.array:
         """Calculate the discharge in active channels."""
         return (
-            self.channel_discharge_coeff(channel_size) * self.grid.calc_grad_at_link(potential)
+            self.channel_discharge_coeff(potential, channel_size) * self.calc_grad_at_link(potential)
         )
 
     def calc_sheet_opening(self, sheet_thickness: jnp.array) -> jnp.array:
@@ -178,7 +210,7 @@ class SubglacialDrainageSystem(eqx.Module):
         """Calculate the dissipation of potential energy in the channelized system."""
         sheet_discharge_on_links = self.sheet_discharge_on_links(potential, sheet_thickness)
         channel_discharge = self.channel_discharge(potential, channel_size)
-        gradient = self.grid.calc_grad_at_link(potential)
+        gradient = self.calc_grad_at_link(potential)
 
         return (
             jnp.abs(self.cavity_spacing * sheet_discharge_on_links * gradient)
@@ -198,7 +230,7 @@ class SubglacialDrainageSystem(eqx.Module):
         sheet_discharge = self.sheet_discharge_on_links(potential, sheet_thickness)
         channel_discharge = self.channel_discharge(potential, channel_size)
         water_pressure = self.calc_water_pressure(potential)
-        pressure_gradient = self.grid.calc_grad_at_link(water_pressure)
+        pressure_gradient = self.calc_grad_at_link(water_pressure)
 
         total_discharge = jnp.where(
             (channel_size > 0) | ((pressure_gradient * sheet_discharge) > 0),
@@ -246,7 +278,13 @@ class SubglacialDrainageSystem(eqx.Module):
 
             return first_patch + second_patch
         
-        return jax.vmap(discharge_dot_normal)(jnp.arange(self.grid.number_of_links))
+        exchange = jax.vmap(discharge_dot_normal)(jnp.arange(self.grid.number_of_links))
+
+        return jnp.where(
+            self.status_at_link == 0,
+            exchange,
+            0.0
+        )
 
     def update_sheet_flow(self, potential: jnp.array, sheet_thickness: jnp.array, dt: float) -> jnp.array:
         """Update the thickness of distributed sheet flow."""
@@ -259,7 +297,11 @@ class SubglacialDrainageSystem(eqx.Module):
         solver = optx.Newton(rtol = 1e-5, atol = 1e-5)
         solution = optx.root_find(residual, solver, sheet_thickness, args = None)
 
-        return solution.value
+        return jnp.where(
+            self.boundary_tags == 0,
+            solution.value,
+            0.0
+        )
 
     def update_channel_flow(
         self, 
@@ -269,12 +311,14 @@ class SubglacialDrainageSystem(eqx.Module):
         dt: float
     ) -> jnp.array:
         """Update the cross-sectional area of active channels."""
-        dSdt = lambda S: (
+        dSdt = lambda S: jnp.where(
+            self.status_at_link == 0,
             (
                 self.energy_dissipation(potential, sheet_thickness, S)
                 - self.sensible_heat(potential, sheet_thickness, S)
             ) / (self.state.ice_density * self.state.ice_latent_heat)
-            - self.calc_channel_closure(potential, S)
+            - self.calc_channel_closure(potential, S),
+            0.0
         )
 
         residual = lambda S, _: S - channel_size - dt * dSdt(S)
@@ -282,11 +326,7 @@ class SubglacialDrainageSystem(eqx.Module):
         solver = optx.Newton(rtol = 1e-5, atol = 1e-5)
         solution = optx.root_find(residual, solver, channel_size, args = None)
 
-        return jnp.where(
-            solution.value < self.min_channel_size,
-            self.min_channel_size,
-            solution.value
-        )
+        return solution.value
 
     def build_forcing_vector(
         self,
@@ -340,10 +380,12 @@ class SubglacialDrainageSystem(eqx.Module):
         face_len = self.grid.length_of_face[self.grid.face_at_link[link]]
         sheet_thickness_on_link = 0.5 * (sheet_thickness[i] + sheet_thickness[j])
 
+        gradient = self.calc_grad_at_link(potential)[link]
+
         sheet_flux = (
             -self.sheet_conductivity
             * sheet_thickness_on_link**self.sheet_flow_exp
-            * jnp.abs(self.grid.calc_grad_at_link(potential)[link])**(-1/2)
+            * jnp.abs(gradient)**(-1/2)
             * face_len
             / link_len
         )
@@ -351,11 +393,16 @@ class SubglacialDrainageSystem(eqx.Module):
         channel_flux = 0.5 * (
             -self.channel_conductivity
             * channel_size[link]**self.channel_flow_exp
+            * jnp.abs(gradient)**(-1/2)
             * face_len
             / link_len
         )
 
-        return sheet_flux + channel_flux
+        return jnp.where(
+            self.status_at_link[link] == 0,
+            sheet_flux + channel_flux,
+            0.0
+        )
 
     def assemble_row(
         self, 
@@ -378,11 +425,9 @@ class SubglacialDrainageSystem(eqx.Module):
             0.0
         )
 
-        boundary_tags = self.set_inflow_outflow(self.base_potential)
-
         added_forcings = jnp.where(
-            (boundary_tags[adj_nodes] == -1) & (adj_nodes != -1),
-            -coeffs * potential[adj_nodes],
+            (self.boundary_tags[adj_nodes] == -1) & (adj_nodes != -1),
+            -coeffs * self.base_potential[adj_nodes],
             0.0
         )
 
@@ -394,14 +439,13 @@ class SubglacialDrainageSystem(eqx.Module):
             j = adj_nodes[jidx]
             jcell = self.grid.cell_at_node[j]
 
+            # If jcell != -1, it is an interior cell
+            # If jcell == -1, it is a boundary cell
+            # but recall that the coefficients at Neumann boundaries are always zero
             row = jnp.where(
-                boundary_tags[j] == 0,
+                jcell != -1,
                 row.at[jcell].add(coeffs[jidx]).at[cell].add(-coeffs[jidx]),
-                jnp.where(
-                    boundary_tags[j] == -1,
-                    row.at[cell].add(-coeffs[jidx]),
-                    row
-                )
+                row.at[cell].add(-coeffs[jidx])
             )
             return row, None
 
@@ -444,27 +488,11 @@ class SubglacialDrainageSystem(eqx.Module):
         operator = lx.MatrixLinearOperator(A)
         solution = lx.linear_solve(operator, b)
 
-        # solution = optx.least_squares(
-        #     lambda x, _: A @ x - b,
-        #     solver = optx.LevenbergMarquardt(rtol = 1e-5, atol = 1e-5),
-        #     y0 = previous_potential[self.grid.node_at_cell],
-        #     args = None
-        # )
-
-        # boundary_values = jnp.where(
-        #     self.set_inflow_outflow(self.base_potential) == -1,
-        #     self.base_potential,
-        #     jnp.nanmean(
-        #         jnp.where(
-        #             self.grid.adjacent_nodes_at_node != -1,
-        #             solution.value[self.grid.adjacent_nodes_at_node],
-        #             jnp.nan
-        #         ),
-        #         axis = 1
-        #     )
-        # )
-
-        boundary_values = self.base_potential
+        boundary_values = jnp.where(
+            self.boundary_tags == 1,
+            0.0,
+            self.base_potential
+        )
 
         return jnp.where(
             self.grid.cell_at_node != -1,

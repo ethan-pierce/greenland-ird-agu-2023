@@ -109,14 +109,8 @@ def test_initialize(grid, model):
     assert model.channel_size.shape == (grid.number_of_links,)
     assert model.links_between_nodes.shape == (grid.number_of_nodes, grid.number_of_nodes)
 
-def test_tmp(grid, model):
+def test_values(grid, model):
     b, A = model.assemble_linear_system(model.potential, model.sheet_thickness, model.channel_size)
 
-    print(b)
-    print(A)
+    phi = model.solve_for_potential(model.potential, model.sheet_thickness, model.channel_size)
 
-    plot_links(grid, model.channel_size)
-
-    im = plt.scatter(grid.node_x, grid.node_y, c = model.grid.cell_at_node)
-    plt.colorbar(im)
-    plt.show()

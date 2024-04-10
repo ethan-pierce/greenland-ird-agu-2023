@@ -20,7 +20,7 @@ def make_grid():
             [1, 1, 20e3, 20e3],
             [1, 60e3, 60e3, 1]
         ),
-        triangle_opts = 'pqDevjza1000000q26',
+        triangle_opts = 'pqDevjza500000q26',
         sort = False
     )
     static = freeze_grid(g)
@@ -34,7 +34,7 @@ def make_grid():
     rng = np.random.default_rng(135)
     g.add_field(
         'bedrock_elevation',
-        np.full(g.number_of_nodes, 1.0),
+        g.node_x * 1e-3,
         at = 'node'
     )
 
@@ -103,11 +103,14 @@ if __name__ == '__main__':
     model = model(state, grid)
 
     print('Running model...')
-    for i in range(10):
-        model = model.update(60.0 * 60.0)
+    import time
+    for i in range(100):
+        start = time.time()
+        model = model.update(60.0 * 60.0 * 24)
+        end = time.time()
 
-        if i % 1 == 0:
-            print('Completed iteration', i)
+        if i % 10 == 0:
+            print('Completed iteration', i, 'in', end - start, 'seconds.')
 
     plot_triangle_mesh(
         grid,
@@ -115,17 +118,9 @@ if __name__ == '__main__':
         subplots_args = {'figsize': (18, 4)}
     )
 
-    plot_triangle_mesh(
-        grid,
-        model.grid.map_mean_of_links_to_node(
-            jnp.abs(model.sheet_discharge_on_links(model.potential, model.sheet_thickness))
-        ),
-        subplots_args = {'figsize': (18, 4)}
-    )
-
     plot_links(
         grid,
-        jnp.log10(model.channel_size),
+        model.channel_size,
         subplots_args = {'figsize': (18, 4)}
     )
 
