@@ -91,7 +91,7 @@ def model(state, grid):
         grid.at_node['surface_melt_rate'],
         state.overburden_pressure * 0.2,
         np.full(grid.number_of_nodes, 0.05),
-        np.full(grid.number_of_links, 0.0),
+        np.full(grid.number_of_links, 1e-3),
     )
 
 if __name__ == '__main__':
@@ -102,29 +102,51 @@ if __name__ == '__main__':
     state = state(grid)
     model = model(state, grid)
 
-    print('Running model...')
-    import time
-    for i in range(10):
-        start = time.time()
-        model = model.update(60.0)
-        end = time.time()
+    phi = model.optimize_potential(
+        model.potential,
+        model.sheet_thickness,
+        model.channel_size
+    )
+    im = plt.scatter(
+        grid.node_x,
+        grid.node_y,
+        c = model.grid.sum_at_nodes(
+            model.channel_discharge(phi, model.channel_size) * model.set_flow_direction(phi)
+        )
+    )
+    plt.colorbar(im)
+    plt.show()
 
-        if i % 1 == 0:
-            print('Completed iteration', i, 'in', end - start, 'seconds.')
-
-    plot_links(
+    plot_triangle_mesh(
         grid,
-        model.sheet_discharge_on_links(model.potential, model.sheet_thickness),
+        phi,
         subplots_args = {'figsize': (18, 4)},
-        title = 'Sheet discharge (m$^3$ s$^{-1}$)'
+        title = 'Optimized hydraulic potential (Pa)'
     )
     quit()
+
+    print('Running model...')
+    import time
+    for i in range(100):
+        start = time.time()
+        model = model.update(60.0 * 60.0 * 24)
+        end = time.time()
+
+        if i % 10 == 0:
+            print('Completed iteration', i, 'in', end - start, 'seconds.')
 
     plot_triangle_mesh(
         grid,
         model.potential,
         subplots_args = {'figsize': (18, 4)},
         title = 'Hydraulic potential (Pa)'
+    )
+
+    plot_triangle_mesh(
+        grid,
+        model.sheet_thickness,
+        subplots_args = {'figsize': (18, 4)},
+        title = 'Sheet thickness (m)'
     )
 
     plot_links(
@@ -139,24 +161,16 @@ if __name__ == '__main__':
         title = 'Sheet discharge (m$^3$ s$^{-1}$)'
     )
 
-    # plot_links(
-    #     grid,
-    #     model.channel_size,
-    #     subplots_args = {'figsize': (18, 4)},
-    #     title = 'Channel size (m$^2$)'
-    # )
+    plot_links(
+        grid,
+        model.channel_size,
+        subplots_args = {'figsize': (18, 4)},
+        title = 'Channel size (m$^2$)'
+    )
 
-    # plot_links(
-    #     grid,
-    #     model.channel_discharge(model.potential, model.channel_size),
-    #     subplots_args = {'figsize': (18, 4)},
-    #     title = 'Channel discharge (m$^3$ s$^{-1}$)'
-    # )
-
-    # Q = jnp.abs(model.channel_discharge(model.potential, model.channel_size))
-    # plot_links(
-    #     grid,
-    #     jnp.where(Q > jnp.percentile(Q, 95), 2, jnp.where(Q > jnp.percentile(Q, 90), 1, 0)),
-    #     subplots_args = {'figsize': (18, 4)},
-    #     title = 'Largest channels'
-    # )
+    plot_links(
+        grid,
+        jnp.abs(model.channel_discharge(model.potential, model.channel_size)),
+        subplots_args = {'figsize': (18, 4)},
+        title = 'Channel discharge (m$^3$ s$^{-1}$)'
+    )

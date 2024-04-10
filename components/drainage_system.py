@@ -83,7 +83,7 @@ class SubglacialDrainageSystem(eqx.Module):
         """Calculate the gradient of an array at links, respecting Neumann boundaries."""
         grad = self.grid.calc_grad_at_link(array)
         return jnp.where(
-            self.grid.status_at_link == 0,
+            self.status_at_link == 0,
             grad,
             0.0
         )
@@ -382,10 +382,9 @@ class SubglacialDrainageSystem(eqx.Module):
             self.melt_input
             - sheet_opening
             + sheet_closure
-
-            # + channel_closure
-            # + channel_source
-            # + (dissipation - sensible_heat) * heat_coeff
+            + channel_closure
+            + channel_source
+            + (dissipation - sensible_heat) * heat_coeff
         )
 
         return forcing_at_nodes[self.grid.node_at_cell]
@@ -414,7 +413,7 @@ class SubglacialDrainageSystem(eqx.Module):
             self.channel_discharge_coeff(potential, channel_size)[link]
             * face_len
             / link_len
-        )
+        )        
 
         return jnp.where(
             self.status_at_link[link] == 0,
@@ -518,6 +517,32 @@ class SubglacialDrainageSystem(eqx.Module):
             boundary_values
         )
 
+    def optimize_potential(
+        self,
+        potential: jnp.array,
+        sheet_thickness: jnp.array,
+        channel_size: jnp.array
+    ) -> jnp.array:
+        """Solve for potential via nonlinear optimization."""
+        def mass_residual(potential, args):
+            sheet_thickness, channel_size = args
+            potential = jnp.where(
+                self.boundary_tags == -1,
+                self.base_potential,
+                potential
+            )
+            channel_discharge = self.channel_discharge(potential, channel_size)
+            return self.grid.sum_at_nodes(channel_discharge * self.set_flow_direction(potential))
+
+        solution = optx.least_squares(
+            lambda phi, args: mass_residual(phi, args),
+            solver = optx.OptaxMinimiser(optax.adabelief(1e-3), rtol = 1e-8, atol = 1e-8),
+            y0 = self.grid.node_x,
+            args = (sheet_thickness, channel_size)
+        )
+
+        return solution.value
+
     @jax.jit
     def update(self, dt: float):
         """Advance the model by one step."""
@@ -529,11 +554,9 @@ class SubglacialDrainageSystem(eqx.Module):
             potential, self.sheet_thickness, dt
         )
 
-        # channel_size = self.update_channel_flow(
-        #     potential, sheet_thickness, self.channel_size, dt
-        # )
-
-        channel_size = self.channel_size
+        channel_size = self.update_channel_flow(
+            potential, sheet_thickness, self.channel_size, dt
+        )
 
         updated = eqx.tree_at(
             lambda t: (t.potential, t.sheet_thickness, t.channel_size),
