@@ -378,17 +378,40 @@ class SubglacialDrainageSystem(eqx.Module):
             0.0
         )
 
-        boundary_tags = self.set_inflow_outflow(potential)
+        boundary_tags = self.set_inflow_outflow(self.base_potential)
 
-        forcing = jnp.where(
+        added_forcings = jnp.where(
             (boundary_tags[adj_nodes] == -1) & (adj_nodes != -1),
-            -coeffs * self.base_potential[adj_nodes],
+            -coeffs * potential[adj_nodes],
             0.0
         )
-        
-        row_diagonal = jnp.zeros(self.grid.number_of_cells).at[cell].set(-jnp.sum(coeffs))
 
-        return (jnp.sum(forcing), row_diagonal)
+        forcing = jnp.sum(added_forcings)
+        
+        empty_row = jnp.zeros(self.grid.number_of_cells)
+
+        def assign_coeffs(row, jidx):
+            j = adj_nodes[jidx]
+            jcell = self.grid.cell_at_node[j]
+
+            row = jnp.where(
+                boundary_tags[j] == 0,
+                row.at[jcell].add(coeffs[jidx]).at[cell].add(-coeffs[jidx]),
+                jnp.where(
+                    boundary_tags[j] == -1,
+                    row.at[cell].add(-coeffs[jidx]),
+                    row
+                )
+            )
+            return row, None
+
+        row, _ = jax.lax.scan(
+            assign_coeffs,
+            empty_row,
+            jnp.arange(len(adj_nodes))
+        )
+    
+        return (forcing, row)
 
     def assemble_linear_system(
         self,
@@ -397,48 +420,6 @@ class SubglacialDrainageSystem(eqx.Module):
         channel_size: jnp.array
     ) -> tuple:
         """Assemble the linear system for potential. Return the matrix 'A' and forcing 'b'."""
-
-        # This function is guaranteed to receive a valid cell id and valid adjacent node j
-        # def add_coeffs_at_link(carry, j, cell):
-        #     forcing, matrix = carry
-        #     adj_cell = self.grid.cell_at_node[j]
-    
-        #     coeffs = self.get_coeffs_at_link(cell, j, previous_potential, sheet_thickness, channel_size)
-
-        #     boundaries = self.set_inflow_outflow(self.base_potential)
-
-        #     forcing = jax.lax.cond(
-        #         boundaries[j] == -1,
-        #         lambda: forcing.at[cell].set(-coeffs * self.base_potential[j]),
-        #         lambda: forcing
-        #     )
-
-        #     # This is a triple conditional switch to handle interior, inflow, and outflow boundaries
-        #     # First condition: if not a boundary // else
-        #     matrix = jnp.where(
-        #         boundaries[j] == 0,
-        #         # If the adjacent node is not a boundary, matrix[i, j] = coeffs and matrix[i, i] += -coeffs
-        #         matrix.at[cell, adj_cell].set(coeffs).at[cell, cell].add(-coeffs),
-        #         # Second condition: if inflow boundary // else (must be outflow boundary)
-        #         jnp.where(
-        #             boundaries[j] == 1,
-        #             # If the adjacent node is an inflow boundary, matrix[i, j] = 0 and matrix[i, i] += 0
-        #             matrix,
-        #             # If the adjacent node is an outflow boundary, matrix[i, i] += -coeffs and forcing[i] += -coeffs * boundary value
-        #             matrix.at[cell, cell].add(-coeffs)
-        #         )
-        #     )
-
-        #     return (forcing, matrix), None
-
-        # empty_forcing = jnp.zeros(self.grid.number_of_cells)
-        # empty_matrix = jnp.zeros((self.grid.number_of_cells, self.grid.number_of_cells))
-
-        # carry, _ = jax.lax.scan(
-        #     assemble_row,
-        #     (empty_forcing, empty_matrix),
-        #     jnp.arange(self.grid.number_of_cells)
-        # )
 
         forcing, matrix = jax.vmap(self.assemble_row, in_axes = (0, None, None, None))(
             jnp.arange(self.grid.number_of_cells),
@@ -459,14 +440,36 @@ class SubglacialDrainageSystem(eqx.Module):
         channel_size: jnp.array
     ) -> jnp.array:
         """Solve the elliptic equation for potential."""
-        A, b = self.assemble_linear_system(previous_potential, sheet_thickness, channel_size)
+        b, A = self.assemble_linear_system(previous_potential, sheet_thickness, channel_size)
         operator = lx.MatrixLinearOperator(A)
         solution = lx.linear_solve(operator, b)
+
+        # solution = optx.least_squares(
+        #     lambda x, _: A @ x - b,
+        #     solver = optx.LevenbergMarquardt(rtol = 1e-5, atol = 1e-5),
+        #     y0 = previous_potential[self.grid.node_at_cell],
+        #     args = None
+        # )
+
+        # boundary_values = jnp.where(
+        #     self.set_inflow_outflow(self.base_potential) == -1,
+        #     self.base_potential,
+        #     jnp.nanmean(
+        #         jnp.where(
+        #             self.grid.adjacent_nodes_at_node != -1,
+        #             solution.value[self.grid.adjacent_nodes_at_node],
+        #             jnp.nan
+        #         ),
+        #         axis = 1
+        #     )
+        # )
+
+        boundary_values = self.base_potential
 
         return jnp.where(
             self.grid.cell_at_node != -1,
             solution.value[self.grid.cell_at_node],
-            self.base_potential
+            boundary_values
         )
 
     @jax.jit

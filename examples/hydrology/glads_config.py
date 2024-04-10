@@ -34,7 +34,7 @@ def make_grid():
     rng = np.random.default_rng(135)
     g.add_field(
         'bedrock_elevation',
-        rng.random(g.number_of_nodes) + (g.node_x - np.max(g.node_x)) * 1e-3,
+        np.full(g.number_of_nodes, 1.0),
         at = 'node'
     )
 
@@ -89,7 +89,7 @@ def model(state, grid):
     return SubglacialDrainageSystem(
         state, 
         grid.at_node['surface_melt_rate'],
-        state.overburden_pressure * 0.2,
+        state.bedrock_elevation * state.water_density * state.gravity,
         np.full(grid.number_of_nodes, 0.05),
         np.full(grid.number_of_links, 0.0),
     )
@@ -102,49 +102,42 @@ if __name__ == '__main__':
     state = state(grid)
     model = model(state, grid)
 
-    b, A = model.assemble_linear_system(model.potential, model.sheet_thickness, model.channel_size)
-    base_forcing = model.build_forcing_vector(model.potential, model.sheet_thickness, model.channel_size)
+    print('Running model...')
+    for i in range(10):
+        model = model.update(60.0 * 60.0)
 
-    plt.plot(b - base_forcing)
-    plt.show()
+        if i % 1 == 0:
+            print('Completed iteration', i)
 
+    plot_triangle_mesh(
+        grid,
+        model.sheet_thickness,
+        subplots_args = {'figsize': (18, 4)}
+    )
 
-    # print('Running model...')
-    # for i in range(50):
-    #     model = model.update(60.0 * 60.0 * 6)
+    plot_triangle_mesh(
+        grid,
+        model.grid.map_mean_of_links_to_node(
+            jnp.abs(model.sheet_discharge_on_links(model.potential, model.sheet_thickness))
+        ),
+        subplots_args = {'figsize': (18, 4)}
+    )
 
-    #     if i % 10 == 0:
-    #         print('Completed iteration', i)
+    plot_links(
+        grid,
+        jnp.log10(model.channel_size),
+        subplots_args = {'figsize': (18, 4)}
+    )
 
-    # plot_triangle_mesh(
-    #     grid,
-    #     model.sheet_thickness,
-    #     subplots_args = {'figsize': (18, 4)}
-    # )
+    Q = jnp.abs(model.channel_discharge(model.potential, model.channel_size))
+    plot_links(
+        grid,
+        jnp.where(Q > jnp.percentile(Q, 90), 2, jnp.where(Q > jnp.percentile(Q, 80), 1, 0)),
+        subplots_args = {'figsize': (18, 4)}
+    )
 
-    # plot_triangle_mesh(
-    #     grid,
-    #     model.grid.map_mean_of_links_to_node(
-    #         jnp.abs(model.sheet_discharge_on_links(model.potential, model.sheet_thickness))
-    #     ),
-    #     subplots_args = {'figsize': (18, 4)}
-    # )
-
-    # plot_links(
-    #     grid,
-    #     jnp.log10(model.channel_size),
-    #     subplots_args = {'figsize': (18, 4)}
-    # )
-
-    # Q = jnp.abs(model.channel_discharge(model.potential, model.channel_size))
-    # plot_links(
-    #     grid,
-    #     jnp.where(Q > jnp.percentile(Q, 90), 2, jnp.where(Q > jnp.percentile(Q, 80), 1, 0)),
-    #     subplots_args = {'figsize': (18, 4)}
-    # )
-
-    # plot_triangle_mesh(
-    #     grid,
-    #     model.potential,
-    #     subplots_args = {'figsize': (18, 4)}
-    # )
+    plot_triangle_mesh(
+        grid,
+        model.potential,
+        subplots_args = {'figsize': (18, 4)}
+    )
