@@ -89,7 +89,7 @@ def model(state, grid):
     return SubglacialDrainageSystem(
         state, 
         grid.at_node['surface_melt_rate'],
-        state.bedrock_elevation * state.water_density * state.gravity,
+        state.overburden_pressure * 0.2,
         np.full(grid.number_of_nodes, 0.05),
         np.full(grid.number_of_links, 0.0),
     )
@@ -104,35 +104,59 @@ if __name__ == '__main__':
 
     print('Running model...')
     import time
-    for i in range(100):
+    for i in range(10):
         start = time.time()
-        model = model.update(60.0 * 60.0 * 24)
+        model = model.update(60.0)
         end = time.time()
 
-        if i % 10 == 0:
+        if i % 1 == 0:
             print('Completed iteration', i, 'in', end - start, 'seconds.')
 
-    plot_triangle_mesh(
-        grid,
-        model.sheet_thickness,
-        subplots_args = {'figsize': (18, 4)}
-    )
-
     plot_links(
         grid,
-        model.channel_size,
-        subplots_args = {'figsize': (18, 4)}
+        model.sheet_discharge_on_links(model.potential, model.sheet_thickness),
+        subplots_args = {'figsize': (18, 4)},
+        title = 'Sheet discharge (m$^3$ s$^{-1}$)'
     )
-
-    Q = jnp.abs(model.channel_discharge(model.potential, model.channel_size))
-    plot_links(
-        grid,
-        jnp.where(Q > jnp.percentile(Q, 90), 2, jnp.where(Q > jnp.percentile(Q, 80), 1, 0)),
-        subplots_args = {'figsize': (18, 4)}
-    )
+    quit()
 
     plot_triangle_mesh(
         grid,
         model.potential,
-        subplots_args = {'figsize': (18, 4)}
+        subplots_args = {'figsize': (18, 4)},
+        title = 'Hydraulic potential (Pa)'
     )
+
+    plot_links(
+        grid,
+        jnp.abs(model.sheet_discharge_on_links(model.potential, model.sheet_thickness))
+        * jnp.where(
+            model.grid.face_at_link != -1,
+            model.grid.length_of_face[model.grid.face_at_link],
+            0.0
+        ),
+        subplots_args = {'figsize': (18, 4)},
+        title = 'Sheet discharge (m$^3$ s$^{-1}$)'
+    )
+
+    # plot_links(
+    #     grid,
+    #     model.channel_size,
+    #     subplots_args = {'figsize': (18, 4)},
+    #     title = 'Channel size (m$^2$)'
+    # )
+
+    # plot_links(
+    #     grid,
+    #     model.channel_discharge(model.potential, model.channel_size),
+    #     subplots_args = {'figsize': (18, 4)},
+    #     title = 'Channel discharge (m$^3$ s$^{-1}$)'
+    # )
+
+    # Q = jnp.abs(model.channel_discharge(model.potential, model.channel_size))
+    # plot_links(
+    #     grid,
+    #     jnp.where(Q > jnp.percentile(Q, 95), 2, jnp.where(Q > jnp.percentile(Q, 90), 1, 0)),
+    #     subplots_args = {'figsize': (18, 4)},
+    #     title = 'Largest channels'
+    # )

@@ -5,6 +5,7 @@ import jax.numpy as jnp
 import equinox as eqx
 import lineax as lx
 import optimistix as optx
+import optax
 from functools import partial
 
 from utils import StaticGrid
@@ -32,7 +33,7 @@ class SubglacialDrainageSystem(eqx.Module):
     sheet_conductivity: float = 1e-2 # m^7/4 kg^-1/2
     sheet_flow_exp: float = 5/4
     channel_conductivity: float = 0.1 # m^3/2 kg^-1/2
-    channel_flow_exp: float = 3
+    channel_flow_exp: float = 5/4
     bedrock_step_height: float = 0.1 # m
     cavity_spacing: float = 2.0 # m
     closure_coeff: float = 5e-25 # Pa^-3 s^-1
@@ -154,7 +155,7 @@ class SubglacialDrainageSystem(eqx.Module):
     def channel_discharge_coeff(self, potential: jnp.array, channel_size: jnp.array) -> jnp.array:
         """Calculate the discharge coefficient for active channels."""
         gradient = self.calc_grad_at_link(potential)
-        coeff = -self.channel_conductivity * channel_size**self.channel_flow_exp * jnp.abs(gradient)**(0)
+        coeff = -self.channel_conductivity * channel_size**self.channel_flow_exp * jnp.abs(gradient)**(-1/2)
         return jnp.where(
             gradient == 0,
             0.0,
@@ -216,6 +217,27 @@ class SubglacialDrainageSystem(eqx.Module):
             jnp.abs(self.cavity_spacing * sheet_discharge_on_links * gradient)
             + jnp.abs(channel_discharge * gradient)
         )
+
+    def sensible_heat_coeff(
+        self,
+        potential: jnp.array,
+        sheet_thickness: jnp.array,
+        channel_size: jnp.array
+    ) -> jnp.array:
+        """Calculate the coefficient of sensible heat change in the channelized system."""
+        heat_coeff = (
+            -self.pressure_melt_coeff * self.heat_capacity * self.state.water_density
+        )
+        sheet_discharge = self.sheet_discharge_on_links(potential, sheet_thickness)
+        channel_discharge = self.channel_discharge(potential, channel_size)
+
+        total_discharge = jnp.where(
+            channel_size > 0,
+            channel_discharge + self.cavity_spacing,
+            channel_discharge
+        )
+
+        return heat_coeff * total_discharge * pressure_gradient
 
     def sensible_heat(
         self,
@@ -358,11 +380,12 @@ class SubglacialDrainageSystem(eqx.Module):
         
         forcing_at_nodes = (
             self.melt_input
-            + sheet_closure
             - sheet_opening
-            + channel_closure
-            + channel_source
-            + (dissipation - sensible_heat) * heat_coeff
+            + sheet_closure
+
+            # + channel_closure
+            # + channel_source
+            # + (dissipation - sensible_heat) * heat_coeff
         )
 
         return forcing_at_nodes[self.grid.node_at_cell]
@@ -378,22 +401,17 @@ class SubglacialDrainageSystem(eqx.Module):
         link = self.links_between_nodes[i, j]
         link_len = self.grid.length_of_link[link]
         face_len = self.grid.length_of_face[self.grid.face_at_link[link]]
-        sheet_thickness_on_link = 0.5 * (sheet_thickness[i] + sheet_thickness[j])
 
         gradient = self.calc_grad_at_link(potential)[link]
 
         sheet_flux = (
-            -self.sheet_conductivity
-            * sheet_thickness_on_link**self.sheet_flow_exp
-            * jnp.abs(gradient)**(-1/2)
+            self.sheet_discharge_coeff(potential, sheet_thickness)[link]
             * face_len
             / link_len
         )
 
         channel_flux = 0.5 * (
-            -self.channel_conductivity
-            * channel_size[link]**self.channel_flow_exp
-            * jnp.abs(gradient)**(-1/2)
+            self.channel_discharge_coeff(potential, channel_size)[link]
             * face_len
             / link_len
         )
@@ -511,9 +529,11 @@ class SubglacialDrainageSystem(eqx.Module):
             potential, self.sheet_thickness, dt
         )
 
-        channel_size = self.update_channel_flow(
-            potential, sheet_thickness, self.channel_size, dt
-        )
+        # channel_size = self.update_channel_flow(
+        #     potential, sheet_thickness, self.channel_size, dt
+        # )
+
+        channel_size = self.channel_size
 
         updated = eqx.tree_at(
             lambda t: (t.potential, t.sheet_thickness, t.channel_size),

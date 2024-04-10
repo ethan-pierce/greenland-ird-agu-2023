@@ -26,6 +26,7 @@ jaxopt = "^0.8.3"
 lineax = "^0.0.4"
 optimistix = "^0.0.6"
 ruff = "^0.3.3"
+optax = "^0.2.2"
 
 [build-system]
 requires = ["poetry-core"]
