@@ -1,4 +1,4 @@
-"""Generate a TriangleMeshGrid, add netCDF data, and pickle it."""
+"""Generate a TriangleModelGrid, add netCDF data, and pickle it."""
 
 import matplotlib.pyplot as plt
 
@@ -13,7 +13,7 @@ import itertools
 from scipy.interpolate import RBFInterpolator
 from scipy.ndimage import gaussian_filter
 from rasterio.enums import Resampling
-from landlab import TriangleMeshGrid
+from landlab import TriangleModelGrid
 
 
 class GridLoader:
@@ -65,7 +65,7 @@ class GridLoader:
         nodes_x = np.array(self.polygon.exterior.xy[0])
         holes = self.polygon.interiors
 
-        self.grid = TriangleMeshGrid(
+        self.grid = TriangleModelGrid(
             (nodes_y, nodes_x), holes = holes, triangle_opts = self.triangle_opts
         )
 
@@ -304,6 +304,7 @@ def main():
     """Generate a mesh and add netCDF data."""
     from utils.plotting import plot_triangle_mesh
     import warnings
+    import gc
 
     warnings.filterwarnings("ignore")
 
@@ -352,8 +353,6 @@ def main():
             buffer = buffer,
             tolerance = tol
         )
-
-        print(loader.grid.number_of_faces - np.count_nonzero(loader.grid.length_of_face))
 
         print('Mesh nodes: ', loader.grid.number_of_nodes)
         print('Mesh links: ', loader.grid.number_of_links)
@@ -441,6 +440,27 @@ def main():
             at = 'node'
         )
         print("Added surface velocity to grid nodes.")
+        
+        # mar_dir = '/home/egp/repos/greenland-ird/data/ignore/mar'
+        # for f in os.listdir(mar_dir):
+        #     ds = xr.open_dataset(mar_dir + '/' + f)
+        #     da = ds.data_vars['RU'][:, 0, :, :]
+        #     da.rio.write_crs('epsg:4326', inplace=True)
+        #     summer = da[152:244].mean(axis = 0)
+
+        #     summer.plot.imshow()
+        #     plt.show()
+
+        #     clipped = loader._clip(summer)
+        #     projected = loader._reproject(clipped, resolution = resolution)
+        #     filled = loader._interpolate_na(projected)
+        #     rescaled = loader._rescale(filled, 1e-3 / (24 * 60 * 60))
+        #     gridded = loader._interpolate_to_mesh(rescaled, neighbors = 100, smoothing = 0.0)
+            
+        #     year = f.split('-')[-1].replace('.nc', '')
+        #     loader.grid.add_field('summer_runoff_' + year, gridded, at = 'node')
+
+        # plot_triangle_mesh(loader.grid, loader.grid.at_node['summer_runoff_2021'][:], subplots_args = {'figsize': (18, 6)})
 
         loader.grid.save('/home/egp/repos/glacierbento/examples/ird/meshes/' + glacier + '.grid', clobber = True)
 
@@ -449,6 +469,9 @@ def main():
         # plot_triangle_mesh(loader.grid, loader.grid.at_node['surface_velocity_x'][:], subplots_args = {'figsize': (18, 6)})
 
         print('Finished loading data for ' + glacier.replace('-', ' ').capitalize())
+
+        del loader
+        gc.collect()
     
 if __name__ == "__main__":
     main()
