@@ -56,48 +56,45 @@ results = {
 # Step 1: Load data #
 #####################
 
-if args.gen_mesh:
+glacier = 'kangilliup-sermia'
 
-    glacier = 'kangilliup-sermia'
-
-    with open('./examples/cores/gisp2/' + f, 'rb') as g:
-        tmg = pickle.load(g)
-        
-        from landlab.graph.sort.sort import reorient_link_dirs
-        reorient_link_dirs(tmg)
-
-    grid = freeze_grid(tmg)
-
-    H = tmg.at_node['ice_thickness'][:]
-    S = tmg.at_node['smoothed_surface'][:]
+with open('./examples/cores/gisp2/kangilliup-sermia.grid', 'rb') as g:
+    tmg = pickle.load(g)
     
-    gradS = grid.calc_grad_at_link(S)
-    A = 1.2e-24
-    gamma = (2/5) * A * (917 * 9.81)**3
-    secpera = 31556926
-    Ud = gamma * grid.map_mean_of_link_nodes_to_link(H)**4 * gradS**3 * secpera
-    Us = grid.map_vectors_to_links(tmg.at_node['surface_velocity_x'][:], tmg.at_node['surface_velocity_y'][:])
-    Ub = np.where(
-        np.abs(Ud) > np.abs(Us),
-        0.0,
-        np.sign(Ud) * (np.abs(Us) - np.abs(Ud))
-    )
+    from landlab.graph.sort.sort import reorient_link_dirs
+    reorient_link_dirs(tmg)
 
-    tmg.add_field('sliding_velocity', Ub, at = 'link')
-    tmg.add_field('water_pressure', H * 917 * 9.81, at = 'node')
+H = tmg.at_node['ice_thickness'][:]
+tmg.add_field('water_pressure', H * 917 * 9.81, at = 'node')
 
-    state = initialize_state_from_grid(tmg)
+grid = freeze_grid(tmg)
 
-    print('Loaded data for ' + glacier.replace('-', ' ').title())
+S = tmg.at_node['smoothed_surface'][:]
+gradS = grid.calc_grad_at_link(S)
+A = 1.2e-24
+gamma = (2/5) * A * (917 * 9.81)**3
+secpera = 31556926
+Ud = gamma * grid.map_mean_of_link_nodes_to_link(H)**4 * gradS**3 * secpera
+Us = grid.map_vectors_to_links(tmg.at_node['surface_velocity_x'][:], tmg.at_node['surface_velocity_y'][:])
+Ub = np.where(
+    np.abs(Ud) > np.abs(Us),
+    0.0,
+    np.sign(Ud) * (np.abs(Us) - np.abs(Ud))
+)
 
-    with open('./examples/cores/gisp2/landlab_grid.pickle', 'wb') as g:
-        pickle.dump(tmg, g)
+tmg.add_field('sliding_velocity', Ub, at = 'link')
+
+state = initialize_state_from_grid(tmg)
+
+print('Loaded data for ' + glacier.replace('-', ' ').title())
+
+with open('./examples/cores/gisp2/landlab_grid.pickle', 'wb') as g:
+    pickle.dump(tmg, g)
 
 #################################
 # Step 2: Define update routine #
 #################################
 
-@jax.jit
 def update(state, dt: float):
     eroder = GlacialEroder(state)
     state = eroder.update(dt).state
@@ -110,19 +107,21 @@ def update(state, dt: float):
         state.sliding_velocity,
         state.fringe_thickness
     )
-    updated_fringe = advect_fringe.update(dt)
+    state = eqx.tree_at(
+        lambda t: t.fringe_thickness,
+        state,
+        advect_fringe.update(dt).tracer
+    )
 
     advect_disp = TVDAdvector(
         state.grid,
         state.sliding_velocity,
         state.dispersed_thickness
     )
-    updated_dispersed = advect_disp.update(dt)
-
     state = eqx.tree_at(
-        lambda tree: (tree.fringe_thickness, tree.dispersed_thickness),
+        lambda t: t.dispersed_thickness,
         state,
-        (updated_fringe, updated_dispersed)
+        advect_disp.update(dt).tracer
     )
 
     return state
@@ -143,8 +142,8 @@ def constrain_terminus(state, xmin, xmax, ymin, ymax):
 # Step 3: Run models #
 ######################
 
-with open('./examples/cores/gisp2/kangilliup-sermia.grid', 'rb') as g:
-    grids = pickle.load(g)
+with open('./examples/cores/gisp2/landlab_grid.pickle', 'rb') as g:
+    grid = pickle.load(g)
 
 glacier = 'kangilliup-sermia'
 
@@ -194,30 +193,30 @@ for Nc in [0.95, 0.9, 0.8, 0.7, 0.6]:
     plt.rcParams.update({'axes.linewidth': np.sqrt(xish**2 + yish**2) / 10})
 
     if Nc == 0.95:
-        fig = plot_triangle_mesh(grids[glacier], state.ice_thickness, subplots_args = {'figsize': figsize}, show = False, cmap = cmc.batlow)
+        fig = plot_triangle_mesh(grid, state.ice_thickness, subplots_args = {'figsize': figsize}, show = False, cmap = cmc.batlow)
         plt.title(title + ' ice thickness (m)')
         plt.tick_params(axis = 'x', rotation = 25)
         plt.tick_params(axis = 'y', rotation = 25)
         plt.xlabel('Grid x-coordinate')
         plt.ylabel('Grid y-coordinate')
         plt.tight_layout()
-        plt.savefig('./examples/cores/gisp2/results/png/icethk/' + glacier + '.png', dpi = 300)
+        plt.savefig('./examples/cores/gisp2/results/png/' + glacier + '.png', dpi = 300)
         plt.close('all')
-        np.savetxt('./examples/cores/gisp2/results/txt/icethk/' + glacier + '_' + str(int(Nc * 100)) + '.txt', np.asarray(state.ice_thickness))
+        np.savetxt('./examples/cores/gisp2/results/txt/' + glacier + '_' + str(int(Nc * 100)) + '.txt', np.asarray(state.ice_thickness))
 
-        fig = plot_triangle_mesh(grids[glacier], state.grid.map_mean_of_links_to_node(jnp.abs(state.sliding_velocity)), subplots_args = {'figsize': figsize}, show = False, cmap = cmc.batlow)
+        fig = plot_triangle_mesh(grid, state.grid.map_mean_of_links_to_node(jnp.abs(state.sliding_velocity)), subplots_args = {'figsize': figsize}, show = False, cmap = cmc.batlow)
         plt.title(title + ' sliding velocity (m a$^{-1}$)')
         plt.tick_params(axis = 'x', rotation = 25)
         plt.tick_params(axis = 'y', rotation = 25)
         plt.xlabel('Grid x-coordinate')
         plt.ylabel('Grid y-coordinate')
         plt.tight_layout()
-        plt.savefig('./examples/cores/gisp2/results/png/sliding/' + glacier + '.png', dpi = 300)
+        plt.savefig('./examples/cores/gisp2/results/png/' + glacier + '.png', dpi = 300)
         plt.close('all')
-        np.savetxt('./examples/cores/gisp2/results/txt/sliding/' + glacier + '_' + str(int(Nc * 100)) + '.txt', state.grid.map_mean_of_links_to_node(jnp.abs(state.sliding_velocity)))
+        np.savetxt('./examples/cores/gisp2/results/txt/' + glacier + '_' + str(int(Nc * 100)) + '.txt', state.grid.map_mean_of_links_to_node(jnp.abs(state.sliding_velocity)))
 
     eroder = GlacialEroder(state)
-    fig = plot_triangle_mesh(grids[glacier], eroder.calc_abrasion_rate() + eroder.calc_quarrying_rate(), subplots_args = {'figsize': figsize}, show = False, cmap = cmc.batlow, norm = matplotlib.colors.LogNorm())
+    fig = plot_triangle_mesh(grid, eroder.calc_abrasion_rate() + eroder.calc_quarrying_rate(), subplots_args = {'figsize': figsize}, show = False, cmap = cmc.batlow, norm = matplotlib.colors.LogNorm())
     plt.title(title + ' erosion rate (m a$^{-1}$)')
     plt.tick_params(axis = 'x', rotation = 25)
     plt.tick_params(axis = 'y', rotation = 25)
@@ -227,7 +226,7 @@ for Nc in [0.95, 0.9, 0.8, 0.7, 0.6]:
     plt.savefig('./examples/cores/gisp2/results/png/' + glacier + '_' + str(int(Nc * 100)) + '.png', dpi = 300)
     plt.close('all')
 
-    fig = plot_triangle_mesh(grids[glacier], state.melt_rate, subplots_args = {'figsize': figsize}, show = False, cmap = cmc.batlow)
+    fig = plot_triangle_mesh(grid, state.melt_rate, subplots_args = {'figsize': figsize}, show = False, cmap = cmc.batlow)
     plt.title(title + ' melt rate (m a$^{-1}$)')
     plt.tick_params(axis = 'x', rotation = 25)
     plt.tick_params(axis = 'y', rotation = 25)
@@ -259,11 +258,11 @@ for Nc in [0.95, 0.9, 0.8, 0.7, 0.6]:
 
     print('Finished simulation for ' + glacier.replace('-', ' ').title())
 
-    patch_vals = grids[glacier].map_mean_of_patch_nodes_to_patch(state.fringe_thickness)
+    patch_vals = grid.map_mean_of_patch_nodes_to_patch(state.fringe_thickness)
     vmax = jnp.percentile(patch_vals, 99.5)
 
     fig = plot_triangle_mesh(
-        grids[glacier], 
+        grid, 
         state.fringe_thickness, 
         subplots_args = {'figsize': figsize}, 
         show = False, 
@@ -280,7 +279,7 @@ for Nc in [0.95, 0.9, 0.8, 0.7, 0.6]:
     plt.close('all')
     np.savetxt('./examples/cores/gisp2/results/txt/' + glacier + '_' + str(int(Nc * 100)) + '.txt', np.asarray(state.fringe_thickness))
 
-    fig = plot_triangle_mesh(grids[glacier], state.till_thickness, subplots_args = {'figsize': figsize}, show = False, cmap = cmc.batlow)
+    fig = plot_triangle_mesh(grid, state.till_thickness, subplots_args = {'figsize': figsize}, show = False, cmap = cmc.batlow)
     plt.title(title + ' till thickness (m)')
     plt.tick_params(axis = 'x', rotation = 25)
     plt.tick_params(axis = 'y', rotation = 25)
@@ -291,7 +290,7 @@ for Nc in [0.95, 0.9, 0.8, 0.7, 0.6]:
     plt.close('all')
 
     results['glacier'].append(glacier)
-    results['region'].append(regions[glacier])
+    results['region'].append('CW')
     results['N_scalar'].append(Nc)
     results['ice_flux'].append(discharge[glacier])
     results['boundary_flux'].append(float(jnp.sum(state.fringe_thickness[terminus == 1] - state.min_fringe_thickness) * len_terminus * 2700 * 0.6))      

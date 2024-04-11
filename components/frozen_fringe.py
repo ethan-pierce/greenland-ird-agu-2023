@@ -114,6 +114,7 @@ class FrozenFringe(eqx.Module):
             0
         )
 
+    @jax.jit
     def update(self, dt: float):
         """Advance the model by one step of dt years."""
         dt_s = dt * self.state.sec_per_a

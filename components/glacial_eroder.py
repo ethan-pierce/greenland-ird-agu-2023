@@ -45,6 +45,7 @@ class GlacialEroder(eqx.Module):
             )
         )
 
+    @jax.jit
     def update(self, dt: float):
         """Update the model state to reflect erosion over one time step of dt years."""
         abrasion = self.calc_abrasion_rate()
