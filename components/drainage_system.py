@@ -33,7 +33,7 @@ class SubglacialDrainageSystem(eqx.Module):
     sheet_conductivity: float = 1e-2 # m^7/4 kg^-1/2
     sheet_flow_exp: float = 5/4
     channel_conductivity: float = 0.1 # m^3/2 kg^-1/2
-    channel_flow_exp: float = 5/4
+    channel_flow_exp: float = 3
     bedrock_step_height: float = 0.1 # m
     cavity_spacing: float = 2.0 # m
     closure_coeff: float = 5e-25 # Pa^-3 s^-1
@@ -155,7 +155,12 @@ class SubglacialDrainageSystem(eqx.Module):
     def channel_discharge_coeff(self, potential: jnp.array, channel_size: jnp.array) -> jnp.array:
         """Calculate the discharge coefficient for active channels."""
         gradient = self.calc_grad_at_link(potential)
-        coeff = -self.channel_conductivity * channel_size**self.channel_flow_exp * jnp.abs(gradient)**(-1/2)
+        coeff = (
+            -self.channel_conductivity 
+            * channel_size**self.channel_flow_exp 
+            # * jnp.abs(gradient)**(-1/2)
+        )
+
         return jnp.where(
             gradient == 0,
             0.0,
@@ -230,9 +235,11 @@ class SubglacialDrainageSystem(eqx.Module):
         )
         sheet_discharge = self.sheet_discharge_on_links(potential, sheet_thickness)
         channel_discharge = self.channel_discharge(potential, channel_size)
+        water_pressure = self.calc_water_pressure(potential)
+        pressure_gradient = self.calc_grad_at_link(water_pressure)
 
         total_discharge = jnp.where(
-            channel_size > 0,
+            (channel_size > 0) | ((pressure_gradient * sheet_discharge) > 0),
             channel_discharge + self.cavity_spacing,
             channel_discharge
         )
@@ -359,11 +366,11 @@ class SubglacialDrainageSystem(eqx.Module):
         """Calculate the forcing vector for potential at grid cells."""
         sheet_opening = self.calc_sheet_opening(sheet_thickness)
         sheet_closure = self.calc_sheet_closure(potential, sheet_thickness)
-        channel_closure = self.grid.map_mean_of_links_to_node(
-            self.calc_channel_closure(potential, channel_size)
-        )
-        channel_source = self.grid.sum_at_nodes(
-            self.exchange_term(potential, sheet_thickness)
+
+        channel_closure = jnp.abs(
+            self.grid.sum_at_nodes(
+                self.calc_channel_closure(potential, channel_size)
+            )
         )
 
         heat_coeff = (
@@ -377,14 +384,18 @@ class SubglacialDrainageSystem(eqx.Module):
                 potential, sheet_thickness, channel_size
             )
         )
+        channel_opening = jnp.abs(
+            self.grid.sum_at_nodes(
+                (dissipation - sensible_heat) * heat_coeff
+            )
+        )
         
         forcing_at_nodes = (
-            self.melt_input
-            - sheet_opening
-            + sheet_closure
+            (self.melt_input - sheet_opening + sheet_closure) 
+            * self.grid.cell_area_at_node
             + channel_closure
-            + channel_source
-            + (dissipation - sensible_heat) * heat_coeff
+            # Not a typo, channel opening is already formulated as a negative term
+            + channel_opening
         )
 
         return forcing_at_nodes[self.grid.node_at_cell]
@@ -409,7 +420,7 @@ class SubglacialDrainageSystem(eqx.Module):
             / link_len
         )
 
-        channel_flux = 0.5 * (
+        channel_flux = (
             self.channel_discharge_coeff(potential, channel_size)[link]
             * face_len
             / link_len
@@ -517,31 +528,31 @@ class SubglacialDrainageSystem(eqx.Module):
             boundary_values
         )
 
-    def optimize_potential(
-        self,
-        potential: jnp.array,
-        sheet_thickness: jnp.array,
-        channel_size: jnp.array
-    ) -> jnp.array:
-        """Solve for potential via nonlinear optimization."""
-        def mass_residual(potential, args):
-            sheet_thickness, channel_size = args
-            potential = jnp.where(
-                self.boundary_tags == -1,
-                self.base_potential,
-                potential
-            )
-            channel_discharge = self.channel_discharge(potential, channel_size)
-            return self.grid.sum_at_nodes(channel_discharge * self.set_flow_direction(potential))
+    # def optimize_potential(
+    #     self,
+    #     potential: jnp.array,
+    #     sheet_thickness: jnp.array,
+    #     channel_size: jnp.array
+    # ) -> jnp.array:
+    #     """Solve for potential via nonlinear optimization."""
+    #     def mass_residual(potential, args):
+    #         sheet_thickness, channel_size = args
+    #         potential = jnp.where(
+    #             self.boundary_tags == -1,
+    #             self.base_potential,
+    #             potential
+    #         )
+    #         channel_discharge = self.channel_discharge(potential, channel_size)
+    #         return self.grid.sum_at_nodes(channel_discharge * self.set_flow_direction(potential))
 
-        solution = optx.least_squares(
-            lambda phi, args: mass_residual(phi, args),
-            solver = optx.OptaxMinimiser(optax.adabelief(1e-3), rtol = 1e-8, atol = 1e-8),
-            y0 = self.grid.node_x,
-            args = (sheet_thickness, channel_size)
-        )
+    #     solution = optx.least_squares(
+    #         lambda phi, args: mass_residual(phi, args),
+    #         solver = optx.OptaxMinimiser(optax.adabelief(1e-3), rtol = 1e-8, atol = 1e-8),
+    #         y0 = self.grid.node_x,
+    #         args = (sheet_thickness, channel_size)
+    #     )
 
-        return solution.value
+    #     return solution.value
 
     @jax.jit
     def update(self, dt: float):

@@ -20,7 +20,7 @@ def make_grid():
             [1, 1, 20e3, 20e3],
             [1, 60e3, 60e3, 1]
         ),
-        triangle_opts = 'pqDevjza500000q26',
+        triangle_opts = 'pqDevjza1000000q26',
         sort = False
     )
     static = freeze_grid(g)
@@ -89,9 +89,9 @@ def model(state, grid):
     return SubglacialDrainageSystem(
         state, 
         grid.at_node['surface_melt_rate'],
-        state.overburden_pressure * 0.2,
+        state.bedrock_elevation * state.gravity * state.water_density,
         np.full(grid.number_of_nodes, 0.05),
-        np.full(grid.number_of_links, 1e-3),
+        np.full(grid.number_of_links, 1e-8),
     )
 
 if __name__ == '__main__':
@@ -102,34 +102,27 @@ if __name__ == '__main__':
     state = state(grid)
     model = model(state, grid)
 
-    phi = model.optimize_potential(
+    phi = model.solve_for_potential(
         model.potential,
         model.sheet_thickness,
         model.channel_size
     )
-    im = plt.scatter(
-        grid.node_x,
-        grid.node_y,
-        c = model.grid.sum_at_nodes(
-            model.channel_discharge(phi, model.channel_size) * model.set_flow_direction(phi)
-        )
-    )
-    plt.colorbar(im)
-    plt.show()
 
-    plot_triangle_mesh(
+    S = model.update_channel_flow(phi, model.sheet_thickness, model.channel_size, 1.0)
+
+    plot_links(
         grid,
-        phi,
-        subplots_args = {'figsize': (18, 4)},
-        title = 'Optimized hydraulic potential (Pa)'
+        S,
+        subplots_args = {'figsize': (18, 4)}
     )
+
     quit()
 
     print('Running model...')
     import time
-    for i in range(100):
+    for i in range(10):
         start = time.time()
-        model = model.update(60.0 * 60.0 * 24)
+        model = model.update(60.0 * 60.0)
         end = time.time()
 
         if i % 10 == 0:
