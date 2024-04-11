@@ -2,19 +2,25 @@
 
 import numpy as np
 import geopandas as gpd
+
 from utils import GridLoader
 from utils.plotting import plot_triangle_mesh
 
+import warnings
+warnings.filterwarnings("ignore")
+
+def calc_resolution(polygon, n_cells):
+    return int(np.sqrt(polygon.area / n_cells))
+
 def main():
-    geojson = 'glacierbento/examples/cores/gisp2/kangilliup-sermia.geojson'
+    geojson = '/home/egp/repos/glacierbento/examples/cores/gisp2/kangilliup-sermia.geojson'
     bedmachine = "/home/egp/repos/greenland-ird/data/ignore/BedMachineGreenland-v5.nc"
     velocity = "/home/egp/repos/greenland-ird/data/ignore/GRE_G0120_0000.nc"
     geotherm = "/home/egp/repos/greenland-ird/data/ignore/geothermal_heat_flow_map_10km.nc"
-    shapefiles = "/home/egp/repos/greenland-ird/data/basin-outlines/"
 
     glacier = 'kangilliup-sermia'
 
-    area = gpd.read_file(shapefiles + path).geometry.area
+    area = gpd.read_file(geojson).geometry.area
     tol = np.round(float(area) * 2e-8, 2)
     buffer = 250
     q = 24
@@ -113,10 +119,13 @@ def main():
     )
     print("Added surface velocity to grid nodes.")
 
-    loader.grid.save('/home/egp/repos/glacierbento/examples/ird/meshes/' + glacier + '.grid', clobber = True)
+    loader.grid.save('/home/egp/repos/glacierbento/examples/cores/gisp2/' + glacier + '.grid', clobber = True)
 
     # QC
     plot_triangle_mesh(loader.grid, loader.grid.at_node['smoothed_surface'][:], subplots_args = {'figsize': (18, 6)})
     plot_triangle_mesh(loader.grid, loader.grid.at_node['surface_velocity_x'][:], subplots_args = {'figsize': (18, 6)})
 
     print('Finished loading data for ' + glacier.replace('-', ' ').capitalize())
+
+if __name__ == "__main__":
+    main()
