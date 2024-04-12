@@ -26,6 +26,9 @@ class FrozenFringe(eqx.Module):
     beta: float = 1.3
     grain_size: float = 4e-5
     film_thickness: float = 1e-8
+    critical_depth: float = 10
+    cluster_volume_fraction: float = 0.64
+    till_grain_radius: float = 4e-5
     entry_pressure: float = eqx.field(init = False)
     base_temperature: float = eqx.field(init = False)
     bulk_conductivity: float = eqx.field(init = False)
@@ -38,6 +41,7 @@ class FrozenFringe(eqx.Module):
     flow_resistivity: jnp.array = eqx.field(converter = jnp.asarray, init = False)
     heave_rate: jnp.array = eqx.field(converter = jnp.asarray, init = False)
     fringe_growth_rate: jnp.array = eqx.field(converter = jnp.asarray, init = False)
+    dispersed_growth_rate: jnp.array = eqx.field(converter = jnp.asarray, init = False)
 
     def __post_init__(self):
         self.grid = self.state.grid
@@ -73,6 +77,7 @@ class FrozenFringe(eqx.Module):
         )
         self.heave_rate = self.calc_heave_rate()
         self.fringe_growth_rate = self.calc_fringe_growth_rate()
+        self.dispersed_growth_rate = self.calc_dispersed_growth_rate()
 
     def calc_heave_rate(self):
         """Calculate the rate of vertical heave acting on the frozen fringe."""
@@ -114,6 +119,32 @@ class FrozenFringe(eqx.Module):
             0
         )
 
+    def calc_dispersed_growth_rate(self):
+        """Calculate the rate of vertical sediment entrainment in dispersed basal ice layers."""
+        temp_at_top_of_fringe = (
+            self.melt_temperature 
+            - (self.melt_temperature - self.base_temperature)
+            * self.supercooling
+        )
+        gradient = (self.melt_temperature - temp_at_top_of_fringe) / self.critical_depth
+        permeability = (
+            (self.till_grain_radius**2 * (1 - self.cluster_volume_fraction)**3)
+            / (45 * self.cluster_volume_fraction**2)
+        )
+        rate_coeff = (
+            (permeability * self.state.ice_density * self.state.ice_latent_heat)
+            / 
+            (
+                self.state.water_viscosity 
+                * self.melt_temperature 
+                * (2 * self.ice_conductivity + self.sediment_conductivity)
+            )
+        )
+        return (
+            gradient * (rate_coeff * 3 * self.ice_conductivity) 
+            / (1 + rate_coeff * self.state.ice_density * self.state.ice_latent_heat)
+        )
+
     @jax.jit
     def update(self, dt: float):
         """Advance the model by one step of dt years."""
@@ -133,10 +164,14 @@ class FrozenFringe(eqx.Module):
             fringe_thickness
         )
 
+        dispersed_thickness = (
+            self.state.dispersed_thickness + self.dispersed_growth_rate * dt_s
+        )
+
         updated_state = eqx.tree_at(
-            lambda tree: tree.fringe_thickness, 
+            lambda tree: (tree.fringe_thickness, tree.dispersed_thickness),
             self.state,
-            fringe_thickness
+            (fringe_thickness, dispersed_thickness)
         )
 
         till_thickness = self.state.till_thickness - (real_growth + self.state.min_fringe_thickness)
