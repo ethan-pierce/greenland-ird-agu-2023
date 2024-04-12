@@ -127,7 +127,8 @@ def plot_links(
     cmap = plt.cm.jet,
     subplots_args = None,
     show = True,
-    title = None
+    title = None,
+    norm = None
 ):
     """Plot a field defined on grid links."""
     lines = []
@@ -140,8 +141,11 @@ def plot_links(
         ys = (grid.node_x[tail], grid.node_y[tail])
 
         lines.append([xs, ys])
+
+    if norm is None:
+        norm = matplotlib.colors.Normalize(vmin = np.min(field), vmax = np.max(field))
         
-    collection = matplotlib.collections.LineCollection(lines, cmap = cmap)
+    collection = matplotlib.collections.LineCollection(lines, cmap = cmap, norm = norm)
     collection.set_array(field)
 
     if subplots_args is None:

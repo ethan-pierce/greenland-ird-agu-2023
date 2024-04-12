@@ -68,6 +68,7 @@ class ModelState(eqx.Module):
     till_thickness: jax.Array = eqx.field(converter = jnp.asarray, init = False)
     fringe_thickness: jax.Array = eqx.field(converter = jnp.asarray, init = False)
     dispersed_thickness: jax.Array = eqx.field(converter = jnp.asarray, init = False)
+    sediment_fluxes: jax.Array = eqx.field(converter = jnp.asarray, init = False)
 
     # Physical parameters
     time_elapsed: float = 0.0
@@ -125,11 +126,12 @@ class ModelState(eqx.Module):
         self.till_thickness = jnp.full(self.grid.number_of_nodes, 0.0)
         self.fringe_thickness = jnp.full(self.grid.number_of_nodes, self.min_fringe_thickness)
         self.dispersed_thickness = jnp.full(self.grid.number_of_nodes, 0.0)
+        self.sediment_fluxes = jnp.zeros(self.grid.number_of_links)
 
     def calc_shear_stress(self):
         """Calculate shear stress at grid nodes (Zoet and Iverson, 2020)."""
-        velocity_magnitude = jnp.abs(
-            self.grid.map_mean_of_links_to_node(self.sliding_velocity)
+        velocity_magnitude = self.grid.map_mean_of_links_to_node(
+                jnp.abs(self.sliding_velocity)
         )
         threshold_velocity = self.slip_law_coefficient * self.effective_pressure
         velocity_factor = jnp.float_power(

@@ -55,8 +55,8 @@ grid.add_field('sliding_velocity', np.full(grid.number_of_links, Ub), at = 'link
 
 grid.add_field('geothermal_heat_flux', np.full(grid.number_of_nodes, 0.05), at = 'node')
 
-grid.add_field('water_pressure', np.full(grid.number_of_nodes, H * 917 * 9.81 * 0.8), at = 'node')
-print('Effective pressure:', H * 917 * 9.81 * 0.2 * 1e-6, 'MPa')
+grid.add_field('water_pressure', np.full(grid.number_of_nodes, H * 917 * 9.81 * 0.95), at = 'node')
+print('Effective pressure:', H * 917 * 9.81 * 0.05 * 1e-6, 'MPa')
 
 # Initialize the model state
 state = ModelState(
@@ -69,11 +69,14 @@ state = ModelState(
 )
 state = eqx.tree_at(lambda t: t.surface_slope, state, grid.at_node['surface_slope'])
 state = eqx.tree_at(lambda t: t.till_thickness, state, np.full(grid.number_of_nodes, 20.0))
-state = eqx.tree_at(lambda t: t.fringe_thickness, state, np.full(grid.number_of_nodes, 1e-3))
+state = eqx.tree_at(lambda t: t.fringe_thickness, state, np.full(grid.number_of_nodes, 0.10))
 
 # Initialize the FrozenFringe component
 model = FrozenFringe(state = state)
 model = eqx.tree_at(lambda t: t.critical_depth, model, H - 100)
+
+print(model.dispersed_growth_rate[4] * 31556926)
+quit()
 
 # Get the frozen fringe to steady state
 dts = [1e-7]

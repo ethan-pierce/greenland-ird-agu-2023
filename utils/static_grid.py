@@ -207,6 +207,7 @@ class StaticGrid(eqx.Module):
         normals = jax.vmap(norm_at_link)(jnp.arange(self.number_of_links))
         return normals
 
+    # Not JIT compatible
     def build_link_between_nodes_array(self):
         """Construct an array of links connecting each pair of nodes."""
         link_between_nodes = np.full((self.number_of_nodes, self.number_of_nodes), -1)
@@ -221,7 +222,7 @@ class StaticGrid(eqx.Module):
                 link_between_nodes[i, j] = link
 
         return link_between_nodes
-
+        
 
 def freeze_grid(grid) -> StaticGrid:
     """Convert an existing Landlab grid to a new StaticGrid"""

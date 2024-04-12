@@ -8,6 +8,40 @@ from scipy.spatial import KDTree
 from landlab import TriangleModelGrid
 from utils import StaticGrid
 
+def identify_upwind_ghosts(grid, velocity):
+    head_x = grid.node_x[grid.node_at_link_head]
+    head_y = grid.node_y[grid.node_at_link_head]
+    tail_x = grid.node_x[grid.node_at_link_tail]
+    tail_y = grid.node_y[grid.node_at_link_tail]
+
+    ghost_if_head_upwind = jnp.asarray([
+        tail_x - (head_x - tail_x),
+        tail_y - (head_y - tail_y)
+    ])
+
+    ghost_if_tail_upwind = jnp.asarray([
+        head_x - (tail_x - head_x),
+        head_y - (tail_y - head_y)
+    ])
+
+    # Convention: consider zero velocity to be positive
+    return jnp.where(
+        velocity >= 0,
+        ghost_if_tail_upwind,
+        ghost_if_head_upwind
+    ).T
+
+def get_nearest_upwind_real(grid, ghosts):
+    """Identify the nearest upwind real nodes for each link."""
+    points = jnp.asarray(
+        [grid.node_x, grid.node_y]
+    ).T
+
+    tree = KDTree(points)
+    _, indices = tree.query(ghosts)
+
+    return indices, points[indices]
+
 class TVDAdvector(eqx.Module):
     """JAX- and Equinox-backed implementation of first-order TVD advection in Landlab."""
 
@@ -15,23 +49,30 @@ class TVDAdvector(eqx.Module):
     velocity: jax.Array = eqx.field(converter = jnp.asarray)
     tracer: jax.Array = eqx.field(converter = jnp.asarray)
 
-    upwind_ghost_at_link: jax.Array = eqx.field(init = False, converter = jnp.asarray)
-    upwind_real_idx: jax.Array = eqx.field(init = False, converter = jnp.asarray)
-    upwind_real_coords: jax.Array = eqx.field(init = False, converter = jnp.asarray)
+    # These should be calculated once, outside of jax.jit, and passed as static args
+    upwind_ghost_at_link: jax.Array = eqx.field(converter = jnp.asarray)
+    upwind_real_idx: jax.Array = eqx.field(converter = jnp.asarray)
+    upwind_real_coords: jax.Array = eqx.field(converter = jnp.asarray)
+
     upwind_shift_vector: jax.Array = eqx.field(init = False, converter = jnp.asarray)
     upwind_values: jax.Array = eqx.field(init = False, converter = jnp.asarray)
 
     def __post_init__(self):
         """Initialize the TVDAdvector."""
-        self.upwind_ghost_at_link = self._identify_upwind_ghosts()
-        self.upwind_real_idx, self.upwind_real_coords = self._get_nearest_upwind_real()
         self.upwind_shift_vector = self._calc_upwind_shift_vector()
         self.upwind_values = self._interp_upwind_values()
 
     @jax.jit
     def update(self, dt: float):
         """Advect the tracer over dt seconds and return the resulting field."""
-        div = self.grid.calc_flux_div_at_node(self.calc_flux())
+        face_flux_at_links = self.calc_flux()
+        sum_at_nodes = jnp.sum(face_flux_at_links[self.grid.links_at_node], axis = 1)
+
+        div = jnp.where(
+            self.grid.cell_area_at_node != 0,
+            sum_at_nodes / self.grid.cell_area_at_node,
+            0.0
+        )
 
         return eqx.tree_at(
             lambda tree: tree.tracer,
@@ -130,6 +171,7 @@ class TVDAdvector(eqx.Module):
         """Calculate the flux at links."""
         return self.velocity * self._calc_face_flux()
 
+    # BUG: This will severely underestimate the stable timestep
     def calc_stable_dt(self, cfl: float = 0.2):
         """Calculate the stable timestep for advection."""
         return cfl * jnp.min(self.grid.length_of_link) / (2 * jnp.max(jnp.abs(self.velocity)))

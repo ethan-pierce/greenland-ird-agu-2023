@@ -25,9 +25,10 @@ import jax.numpy as jnp
 import equinox as eqx
 
 from landlab import RasterModelGrid
-from components import ModelState, GlacialEroder, FrozenFringe
+from components import ModelState, GlacialEroder, FrozenFringe, FluxIntegrator
 from components.model_state import initialize_state_from_grid
-from utils import StaticGrid, TVDAdvection, UpwindAdvection
+from utils import StaticGrid, TVDAdvector
+from utils.unstructured_tvd import identify_upwind_ghosts, get_nearest_upwind_real
 from utils.static_grid import freeze_grid
 from utils.plotting import plot_links, plot_triangle_mesh
 
@@ -142,7 +143,7 @@ if args.gen_mesh:
         Ub = np.where(
             np.abs(Ud) > np.abs(Us),
             0.0,
-            np.sign(Ud) * (np.abs(Us) - np.abs(Ud))
+            np.sign(Us) * (np.abs(Us) - np.abs(Ud))
         )
 
         tmg.add_field('sliding_velocity', Ub, at = 'link')
@@ -161,25 +162,29 @@ if args.gen_mesh:
 #################################
 
 @jax.jit
-def update(state, dt: float):
+def update(state, dt: float, advect_args = None):    
     eroder = GlacialEroder(state)
     state = eroder.update(dt).state
 
     fringe = FrozenFringe(state)
     state = fringe.update(dt).state
 
-    advect = UpwindAdvection(
+    ghosts, upwind_idx, upwind_coords = advect_args
+    advect = TVDAdvector(
         state.grid, 
-        state.fringe_thickness, 
-        state.surface_elevation, 
-        state.sliding_velocity
+        state.sliding_velocity / state.sec_per_a, 
+        state.fringe_thickness,
+        ghosts,
+        upwind_idx,
+        upwind_coords
     )
-    updated_fringe = advect.update(dt)
+    fluxes = advect.calc_flux()
+    advect = advect.update(dt * state.sec_per_a)
 
     state = eqx.tree_at(
-        lambda tree: tree.fringe_thickness,
+        lambda tree: (tree.fringe_thickness, tree.sediment_fluxes),
         state,
-        updated_fringe
+        (advect.tracer, fluxes)
     )
 
     return state
@@ -203,7 +208,8 @@ def constrain_terminus(state, xmin, xmax, ymin, ymax):
 with open('./examples/ird/landlab_grids.pickle', 'rb') as g:
     grids = pickle.load(g)
 
-for Nc in [0.95, 0.9, 0.8, 0.7, 0.6]:
+# for Nc in [0.95, 0.9, 0.8, 0.7, 0.6]:
+for Nc in [0.8]:
     print('Water pressure = ', Nc, ' * overburden pressure.')
 
     for glacier, grid in grids.items():
@@ -232,6 +238,7 @@ for Nc in [0.95, 0.9, 0.8, 0.7, 0.6]:
         adj_terminus = jnp.unique(state.grid.adjacent_nodes_at_node[terminus == 1])
         adj_terminus = adj_terminus.at[adj_terminus != -1].get()
         cross_terminus_links = terminus[state.grid.node_at_link_head] * terminus[state.grid.node_at_link_tail]
+        terminus_links = terminus[state.grid.node_at_link_head] + terminus[state.grid.node_at_link_tail]
         len_terminus = jnp.sum(jnp.where(cross_terminus_links, state.grid.length_of_link, 0.0))
         height_terminus = jnp.mean(state.ice_thickness[terminus])
         terminus_velocity = jnp.max(jnp.abs(state.sliding_velocity))
@@ -301,6 +308,10 @@ for Nc in [0.95, 0.9, 0.8, 0.7, 0.6]:
         plt.savefig('./examples/ird/melt/' + glacier + '_' + str(int(Nc * 100)) + '.png', dpi = 300)
         plt.close('all')
 
+        ghost_nodes = identify_upwind_ghosts(state.grid, state.sliding_velocity)
+        upwind_idx, upwind_coords = get_nearest_upwind_real(state.grid, ghost_nodes)
+        advect_args = (ghost_nodes, upwind_idx, upwind_coords)
+
         if glacier in ['narsap-sermia', 'vestfjord-gletsjer', 'daugaard-jensen-gletsjer']:
             C = 0.05
         else:
@@ -314,10 +325,35 @@ for Nc in [0.95, 0.9, 0.8, 0.7, 0.6]:
         print('dt = ', dt)
 
         time_elapsed = 0.0
-        n_years = 500.0
+        n_years = 100.0
 
+        print('Total time steps = ', int(n_years / dt))
+
+        fluxes = []
+
+        import time
         for i in range(int(n_years / dt)):
-            state = update(state, dt)
+            start = time.time()
+            state = update(state, dt, advect_args)
+            end = time.time()
+
+            fluxes.append(jnp.sum(state.sediment_fluxes[terminus_links > 0] * 2700))
+
+            if i % 50 == 0:
+                print('Time elapsed: ', time_elapsed)
+                print('Wall time (per step): ', end - start)
+                print('Sediment flux: ', fluxes[-1], 'kg / s')
+
+                patch_vals = grids[glacier].map_mean_of_patch_nodes_to_patch(state.fringe_thickness)
+                vmax = jnp.percentile(patch_vals, 99.9)
+                plot_triangle_mesh(
+                    grids[glacier],
+                    state.fringe_thickness,
+                    subplots_args = {'figsize': figsize},
+                    show = True,
+                    cmap = cmc.batlow,
+                    set_clim = {'vmin': 0, 'vmax': vmax}
+                )
 
             time_elapsed += dt
             if time_elapsed > n_years:
@@ -325,6 +361,8 @@ for Nc in [0.95, 0.9, 0.8, 0.7, 0.6]:
                 break
 
         print('Finished simulation for ' + glacier.replace('-', ' ').title())
+
+        np.savetxt('./examples/ird/fluxes/' + glacier + '_' + str(int(Nc * 100)) + '.txt', np.asarray(fluxes))
 
         patch_vals = grids[glacier].map_mean_of_patch_nodes_to_patch(state.fringe_thickness)
         vmax = jnp.percentile(patch_vals, 99.5)
