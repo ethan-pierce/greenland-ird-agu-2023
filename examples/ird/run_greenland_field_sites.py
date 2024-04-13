@@ -105,7 +105,7 @@ discharge = {key: discharge_data[str(val)].iloc[2666:].mean() for key, val in di
 
 results = {
     'glacier': [], 'region': [], 'N_scalar': [], 'ice_flux': [], 
-    'boundary_flux': [], 'proximal_flux': [], 'sediment_flux': [], 
+    'boundary_flux': [], 'proximal_flux': [], 'sediment_flux': [], 'link_flux': [],
     'max_velocity': [], 'max_pressure': [], 'drainage_area': [],
     'mean_fringe': [], 'med_fringe': []
 }
@@ -172,19 +172,18 @@ def update(state, dt: float, advect_args = None):
     ghosts, upwind_idx, upwind_coords = advect_args
     advect = TVDAdvector(
         state.grid, 
-        state.sliding_velocity / state.sec_per_a, 
+        state.sliding_velocity, 
         state.fringe_thickness,
         ghosts,
         upwind_idx,
         upwind_coords
     )
-    fluxes = advect.calc_flux()
-    advect = advect.update(dt * state.sec_per_a)
+    advect = advect.update(dt)
 
     state = eqx.tree_at(
         lambda tree: (tree.fringe_thickness, tree.sediment_fluxes),
         state,
-        (advect.tracer, fluxes)
+        (advect.tracer, advect.calc_flux() * state.grid.length_of_face[state.grid.face_at_link])
     )
 
     return state
@@ -208,8 +207,7 @@ def constrain_terminus(state, xmin, xmax, ymin, ymax):
 with open('./examples/ird/landlab_grids.pickle', 'rb') as g:
     grids = pickle.load(g)
 
-# for Nc in [0.95, 0.9, 0.8, 0.7, 0.6]:
-for Nc in [0.8]:
+for Nc in [0.6, 0.7, 0.8, 0.9, 0.95]:
     print('Water pressure = ', Nc, ' * overburden pressure.')
 
     for glacier, grid in grids.items():
@@ -315,7 +313,7 @@ for Nc in [0.8]:
         if glacier in ['narsap-sermia', 'vestfjord-gletsjer', 'daugaard-jensen-gletsjer']:
             C = 0.05
         else:
-            C = 0.1
+            C = 0.05
 
         dt = C * jnp.nanmin(jnp.where(
             state.sliding_velocity != 0,
@@ -325,35 +323,28 @@ for Nc in [0.8]:
         print('dt = ', dt)
 
         time_elapsed = 0.0
-        n_years = 100.0
+        n_years = 500.0
 
         print('Total time steps = ', int(n_years / dt))
 
         fluxes = []
-
+            
         import time
         for i in range(int(n_years / dt)):
             start = time.time()
             state = update(state, dt, advect_args)
             end = time.time()
 
-            fluxes.append(jnp.sum(state.sediment_fluxes[terminus_links > 0] * 2700))
+            fluxes.append(
+                jnp.sum(
+                    jnp.abs(state.sediment_fluxes[terminus_links == 1])
+                )
+            )            
 
-            if i % 50 == 0:
+            if i % 1000 == 0:
                 print('Time elapsed: ', time_elapsed)
                 print('Wall time (per step): ', end - start)
-                print('Sediment flux: ', fluxes[-1], 'kg / s')
-
-                patch_vals = grids[glacier].map_mean_of_patch_nodes_to_patch(state.fringe_thickness)
-                vmax = jnp.percentile(patch_vals, 99.9)
-                plot_triangle_mesh(
-                    grids[glacier],
-                    state.fringe_thickness,
-                    subplots_args = {'figsize': figsize},
-                    show = True,
-                    cmap = cmc.batlow,
-                    set_clim = {'vmin': 0, 'vmax': vmax}
-                )
+                print('Sediment flux: ', fluxes[-1], 'm^3 / a')
 
             time_elapsed += dt
             if time_elapsed > n_years:
@@ -364,8 +355,8 @@ for Nc in [0.8]:
 
         np.savetxt('./examples/ird/fluxes/' + glacier + '_' + str(int(Nc * 100)) + '.txt', np.asarray(fluxes))
 
-        patch_vals = grids[glacier].map_mean_of_patch_nodes_to_patch(state.fringe_thickness)
-        vmax = jnp.percentile(patch_vals, 99.5)
+        # patch_vals = grids[glacier].map_mean_of_patch_nodes_to_patch(state.fringe_thickness)
+        # vmax = jnp.percentile(patch_vals, 99.5)
 
         fig = plot_triangle_mesh(
             grids[glacier], 
@@ -373,7 +364,8 @@ for Nc in [0.8]:
             subplots_args = {'figsize': figsize}, 
             show = False, 
             cmap = cmc.batlow,
-            set_clim = {'vmin': 0, 'vmax': vmax}
+            # set_clim = {'vmin': 0, 'vmax': vmax},
+            norm = matplotlib.colors.LogNorm()
         )
         plt.title(title + ' fringe thickness (m)')
         plt.tick_params(axis = 'x', rotation = 25)
@@ -402,6 +394,7 @@ for Nc in [0.8]:
         results['boundary_flux'].append(float(jnp.sum(state.fringe_thickness[terminus == 1] - state.min_fringe_thickness) * len_terminus * 2700 * 0.6))      
         results['proximal_flux'].append(float(jnp.sum(state.fringe_thickness[adj_terminus] - state.min_fringe_thickness) * len_terminus * 2700 * 0.6)) 
         results['sediment_flux'].append(float(results['boundary_flux'][-1] + results['proximal_flux'][-1]))
+        results['link_flux'].append(float(fluxes[-1] * 2700 * 0.6))
         results['max_velocity'].append(float(jnp.max(state.sliding_velocity)))
         results['max_pressure'].append(float(jnp.max(state.effective_pressure)))
         results['drainage_area'].append(float(jnp.sum(state.grid.cell_area_at_node) * 1e-6))

@@ -65,14 +65,7 @@ class TVDAdvector(eqx.Module):
     @jax.jit
     def update(self, dt: float):
         """Advect the tracer over dt seconds and return the resulting field."""
-        face_flux_at_links = self.calc_flux()
-        sum_at_nodes = jnp.sum(face_flux_at_links[self.grid.links_at_node], axis = 1)
-
-        div = jnp.where(
-            self.grid.cell_area_at_node != 0,
-            sum_at_nodes / self.grid.cell_area_at_node,
-            0.0
-        )
+        div = self.grid.calc_flux_div_at_node(self.calc_flux())
 
         return eqx.tree_at(
             lambda tree: tree.tracer,

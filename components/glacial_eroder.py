@@ -52,7 +52,8 @@ class GlacialEroder(eqx.Module):
         quarrying = self.calc_quarrying_rate()
         diffusion = self.calc_diffusion_rate()
 
-        total_erosion = (abrasion + quarrying - diffusion) * dt
+        # total_erosion = (abrasion + quarrying - diffusion) * dt
+        total_erosion = (abrasion + quarrying) * dt
 
         updated_state = eqx.tree_at(
             lambda tree: tree.till_thickness, 
